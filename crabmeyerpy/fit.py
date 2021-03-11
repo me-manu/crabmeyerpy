@@ -249,6 +249,8 @@ class FitCrab(object):
 
         # perform fit over both IC and sync
         else:
+            self._ssc.FSyncInterp = None  # init new synchrotron interpolation upon each call
+
             m_sync = self._x < 1e22
             self._y_theo = np.zeros_like(self._x)
             self._y_theo[m_sync] = self._x[m_sync] * (self._ssc.sync(self._x[m_sync], g_steps=50) +

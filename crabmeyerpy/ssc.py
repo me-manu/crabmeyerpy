@@ -406,7 +406,7 @@ class CrabSSC(object):
             S /= (4.0 * pi * c.c.cgs.value * (sigma * sigma + rho * rho))
             if self._params_n_seed['ic_dust']:
                 S_dust /= (4.0 * pi * c.c.cgs.value * (sigma_dust * sigma_dust + rho * rho))
-            S += S_dust
+                S += S_dust
             S /= eps
 
         return S
