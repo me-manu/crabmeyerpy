@@ -63,6 +63,35 @@ def nel_crab_radio(gamma, **params):
     return result
 
 
+def nel_crab_radio_cutoff(gamma, **params):
+    """
+    Computes radio electron number spectrum per unit gamma interval dN / dgamma
+    with exponential cutoff at maximum gamma value
+
+    Paramters
+    ---------
+    gamma: array-like
+        gamma factors
+    params: dict
+        function parameters
+        Parameter names are:
+        Nradio, gradio_min, gradio_max, Sradio
+
+    Returns
+    -------
+    Electron spectrum as array
+
+    Notes
+    -----
+    See Eq. 1 in https://arxiv.org/pdf/1008.4524.pdf
+    """
+    result = np.zeros(gamma.shape)
+    m_radio = (gamma > params['gradio_min'])
+    result[m_radio] = np.power(gamma[m_radio], params['Sradio']) * params['Nradio']
+    result[m_radio] *= np.exp(-gamma[m_radio] / params['gradio_max'])
+    return result
+
+
 def nel_crab_wind(gamma, **params):
     """
     Computes wind electron number spectrum per unit gamma interval dN / dgamma
@@ -156,7 +185,7 @@ def vz_sq(z, sigma):
         + np.power(1. + y_sq - np.sqrt((1. + y_sq) ** 2. - 1), 1. / 3.)
 
     # compute v z^2, KC Eq. A7a
-    vz_sq = Delta * G / (1. + Delta) / 3.
+    vz_sq = np.power(Delta * G / (1. + Delta) / 3., 3.)
 
     return vz_sq
 
@@ -210,7 +239,7 @@ def nel_shock(gamma, **params):
     return result
 
 
-def nel_wind_kc(gamma, r, **params):
+def nel_wind_kc(gamma, r, fill_value=1e-80, **params):
     """
     Computes electron number density dn / dV dgamma
     of the wind electrons as in Atoyan & Atoyan (1996)
@@ -243,7 +272,7 @@ def nel_wind_kc(gamma, r, **params):
 
     # compute gamma' the initial energy
     # with which the electrons where injected
-    result = np.full(gamma.shape, 1e-40)
+    result = np.full(gamma.shape, fill_value)
     m = gamma < gamma_max
     gamma_prime = gamma[m] * np.power(vzz[m], 1. / 3.) / (1. - gamma[m] / gamma_max[m])
 

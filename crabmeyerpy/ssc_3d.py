@@ -1,16 +1,15 @@
 import yaml
-import sys
 from scipy.special import kv  # Bessel function
-from scipy.integrate import simps, trapz
+from scipy.integrate import simps, romb
 from scipy.interpolate import RectBivariateSpline, interp1d
 
 # imports to speed up integrations:
-from numpy import meshgrid, linspace, ones, zeros
-from numpy import log, exp, pi, sqrt, power, tan
+from numpy import meshgrid, linspace, zeros
+from numpy import log, exp, pi, sqrt, tan
 
 # import functions for photon fields
 from .photonfields import *
-from .nb_utils import multi_5dim_piecewise, multi_5dim_simps, black_body_nb, multi_3dim_piecewise
+from .nb_utils import multi_5dim_piecewise, multi_5dim_simps, black_body_nb, multi_5dim_romb
 from .ssc import kpc2cm, eV2erg, eV2Hz, m_e_eV, arcmin2rad, ic_kernel
 from astropy import units as u
 from astropy import constants as c
@@ -168,13 +167,21 @@ class CrabSSC3D(object):
         # build a 2d array for interpolation
         logx = np.linspace(self.__start, self.__end+1, steps)
 
-        for i, s in enumerate(logx):
-            if not i:
-                logx_arr = np.linspace(s, self.__end, steps)
-            else:
-                logx_arr = np.vstack((logx_arr, np.linspace(s, self.__end, steps)))
+        # using original formulation with Bessel function of order 5 / 3:
+        #for i, s in enumerate(logx):
+            #if not i:
+                #logx_arr = np.linspace(s, self.__end, steps)
+            #else:
+                #logx_arr = np.vstack((logx_arr, np.linspace(s, self.__end, steps)))
 
-        xF = np.exp(logx) * simps(kv(5./3., np.exp(logx_arr)) * np.exp(logx_arr), logx_arr, axis=1)
+        #xF = np.exp(logx) * simps(kv(5./3., np.exp(logx_arr)) * np.exp(logx_arr), logx_arr, axis=1)
+        # however, one should take into account that the B field is random
+        # and hence this needs to be averaged over pitch angle, see, e.g., Appendix D
+        # of https://arxiv.org/pdf/1006.1045.pdf
+        x = np.exp(logx)
+        xF = (8. + 3. * x ** 2.) * kv(1./3., x / 2.) **2.
+        xF += x * kv(2./3.,  x / 2.) * (2. * kv(1./3., x / 2.) - 3. * x * kv(2./3., x / 2.))
+        xF *= x / 20.
         xF[xF < 1e-40] = np.full(np.sum(xF < 1e-40), 1e-40)
         self.log_xF = interp1d(logx, np.log(xF))
         self._j_sync_interp = None
@@ -265,10 +272,14 @@ class CrabSSC3D(object):
             self._integrate_5d = multi_5dim_simps
         elif self._integration_mode == "numba_piecewise":
             self._integrate_5d = multi_5dim_piecewise
+        elif self._integration_mode == "numba_romb":
+            self._integrate_5d = multi_5dim_romb
+        elif self._integration_mode == "romb":
+            self._integrate_5d = romb
         else:
-            raise ValueError("Unkown integration mode chosen")
+            raise ValueError("Unknown integration mode chosen")
 
-    def j_sync(self, nu, r, g_steps=50, gmin=None, gmax=None, g_axis=2):
+    def j_sync(self, nu, r, g_steps=65, gmin=None, gmax=None, g_axis=2, integration_mode='simps'):
         """
         Computes the spectral volume emissivity j_nu = j(nu, r) = dE / (dt dV dnu dOmega) for synchrotron radiation
         in erg/s/Hz/cm^3/sr as integral over electron distribution
@@ -346,7 +357,10 @@ class CrabSSC3D(object):
         result[m] *= self._n_el(exp(ggg[m]), rrr[m], **self._params_n_el)
 
         # integrate over gamma
-        result = simps(result * exp(ggg), ggg, axis=g_axis)
+        if integration_mode == 'romb':
+            result = romb(result * exp(ggg), dx=np.diff(log_g)[0], axis=g_axis)
+        else:
+            result = simps(result * exp(ggg), ggg, axis=g_axis)
 
         # pre factors: sqrt(3) * e^3 / mc^2 with B in G, see e.g. B&G 4.44
         # this has then units Fr^3 s^2 B g-1 cm-2
@@ -370,7 +384,7 @@ class CrabSSC3D(object):
         # returns value in unites erg/s/Hz/cm^3/sr
         return result
 
-    def interp_sync_init(self, r_min, r_max, nu_steps=100, g_steps=101, r_steps=50):
+    def interp_sync_init(self, r_min, r_max, nu_steps=100, g_steps=129, r_steps=50, integration_mode='simps'):
         """
         Initialize 2D interpolation of synchrotron emissivity j_nu in erg/s/Hz/cm^3/sr
         over frequency nu and radius  for given electron spectrum in log - log space.
@@ -392,7 +406,7 @@ class CrabSSC3D(object):
                                                      nu_steps, retstep=True)
         r_intp, r_intp_steps = np.linspace(r_min, r_max, r_steps, retstep=True)
         log_nn, rr = np.meshgrid(log_nu_intp, r_intp, indexing='ij')
-        j_sync = self.j_sync(np.exp(log_nn), rr, g_steps=g_steps)
+        j_sync = self.j_sync(np.exp(log_nn), rr, g_steps=g_steps, integration_mode=integration_mode)
 
         if self._use_fast_interp:
             self._j_sync_interp = fast_interp2d([log_nu_intp[0], r_intp[0]],
@@ -481,7 +495,7 @@ class CrabSSC3D(object):
         # results in emissivity erg / s / Hz / cm^3 / sr
         return result
 
-    def phot_dens(self, eps, gamma, r, r_steps=100, r1_steps=100):
+    def phot_dens(self, eps, r, r1_steps=33):
         """
         Calculate photon number density of Crab nebula according to Hillas et al. (1998)
         for the synchrotron and / or dust compoment
@@ -490,12 +504,10 @@ class CrabSSC3D(object):
         ----------
         eps: array-like
             n-dim array with energy of photons, in eV
-        gamma: array
-            m-dim array with gamma factor of electrons
         r: array-like
             angular offset from nebula center in deg
-        r_steps: int
-            number of steps in radius for synchrotron interpolation
+        r1_steps: int
+            number of steps in radius for integration
 
 
         Returns
@@ -509,7 +521,10 @@ class CrabSSC3D(object):
 
         t0 = time.time()
         r_max = np.max([r.max(), 1. * self._r0])
-        r_min = np.min([r.min(), 1e-5])
+        if 'r_shock' in self._params_n_el:
+            r_min = self._params_n_el['r_shock']
+        else:
+            r_min = np.min([r.min(), 1e-5])
 
         # radius for integration of photon emissivity
         r1 = np.logspace(np.log10(r_min), np.log10(r_max), r1_steps)
@@ -521,6 +536,8 @@ class CrabSSC3D(object):
         r1r1 = np.tile(r1, list(eps.shape) + [1])
         yy = r1r1 / r_max
         xx = rr / r_max
+
+        y = r1 / r_max
 
         # photon emissivity
         #j_nu = np.full(ee.shape, 1e-10, dtype=np.float32)
@@ -564,7 +581,11 @@ class CrabSSC3D(object):
             # seed photon density in photons/eV/cm^3
             self._logger.debug(kernel.shape)
             self._logger.debug(f"Integrating using {self._integration_mode}")
-            phot_dens = self._integrate_5d(kernel * yy, log(yy)) * 0.5 * r_max / c.c.cgs.value
+            if self._integration_mode == 'romb':
+                phot_dens = romb(kernel * yy, dx=np.diff(log(y))[0], axis=-1)
+            else:
+                phot_dens = self._integrate_5d(kernel * yy, log(yy))
+            phot_dens *= 0.5 * r_max / c.c.cgs.value
             t3 = time.time()
 
         else:
@@ -585,7 +606,12 @@ class CrabSSC3D(object):
             t02 = time.time()
             kernel_dust = j_dust * kernel_r(yy, xx)
             #phot_dens_dust = simps(kernel_dust * yy, log(yy), axis=-1) * r_max * 0.5 / c.c.cgs.value
-            phot_dens_dust = self._integrate_5d(kernel_dust * yy, log(yy)) * r_max * 0.5 / c.c.cgs.value
+            if self._integration_mode == 'romb':
+                phot_dens_dust = romb(kernel_dust * yy, dx=np.diff(log(y))[0], axis=-1)
+            else:
+                phot_dens_dust = self._integrate_5d(kernel_dust * yy, log(yy))
+            phot_dens_dust *= r_max * 0.5 / c.c.cgs.value
+
             phot_dens += phot_dens_dust
             t03 = time.time()
             self._logger.debug("time to calculate grey body {0:.3f}s "
@@ -596,10 +622,9 @@ class CrabSSC3D(object):
                            " time for filling arrays {2:.3f}s ".format(t2-t1, t3 - t2, t1 - t0))
 
 
-
         return phot_dens
 
-    def j_ic(self, nu, r, g_steps=200, e_steps=90, r1_steps=100):
+    def j_ic(self, nu, r, g_steps=129, e_steps=129, r1_steps=33, integration_mode='simps'):
         """
         Spectral luminosity F_nu in erg/s/Hz/cm^2 for inverse Compton scattering.
 
@@ -647,7 +672,7 @@ class CrabSSC3D(object):
         # calculate photon densities:
         # these are in photons / eV / cm^3
         if self._params_n_seed['ic_sync'] or self._params_n_seed['ic_dust']:
-            phot_dens = self.phot_dens(exp(log_eee), exp(ggg), rrr, r1_steps=r1_steps)
+            phot_dens = self.phot_dens(exp(log_eee), rrr, r1_steps=r1_steps)
         else:
             phot_dens = np.full(log_eee.shape, 1e-40)
 
@@ -669,12 +694,18 @@ class CrabSSC3D(object):
         # cancels since we're integrating over log(energy).
         # now in photons / cm^3 / eV / cm^3
         self._logger.debug(f"kernel shape for integration over photon dens energy: {kernel_in.shape}")
+
+        # only doing this with simps integration since
+        # log_eee spacing is not constant
         kernel_out = simps(kernel_in, log_eee, axis=2)
         kernel_out *= self._n_el(exp(gg), rr, **self._params_n_el) / exp(gg) ** 2.
 
         # integrate over electron gamma factor
         self._logger.debug(f"kernel shape for integration over gamma factor: {kernel_out.shape}")
-        result = simps(kernel_out * exp(gg), gg, axis=1)
+        if integration_mode == 'romb':
+            result = romb(kernel_out * exp(gg), dx=np.diff(log_g)[0], axis=1)
+        else:
+            result = simps(kernel_out * exp(gg), gg, axis=1)
 
         # result of integration is in units of photons/cm^3/eV/cm^3
         # multiplying with Thomson*c*energy converting units gives to
@@ -690,10 +721,10 @@ class CrabSSC3D(object):
         self._logger.debug(f"integration over photon dens and gamma took {t3-t2:.3f}s")
 
         # interpolate result
+        result[result <= 0] = 1e-100
         self._j_ic_interp = RectBivariateSpline(log(nu), r, log(result), kx=3, ky=3, s=0)
 
         return result
-
 
     def theta_max_arcmin(self):
         """
@@ -703,7 +734,13 @@ class CrabSSC3D(object):
         theta_max = np.tan(self._r0 / self._d) / arcmin2rad
         return theta_max
 
-    def intensity(self, nu, theta, which='sync', r_steps=100, r_min=0., **kwargs):
+    def intensity(self, nu, theta,
+                  which='sync',
+                  r_steps=129,
+                  r_min=0.,
+                  log=False,
+                  integration_mode='simps',
+                  **kwargs):
         """
         Compute the specific intensity for the synchrotron emission
         as a line of sight integral over the volume emissivity
@@ -727,6 +764,9 @@ class CrabSSC3D(object):
             specify for which radiation you want to calculate the
             intensity. Either 'sync', 'ic', or 'dust'
 
+        log: bool
+            If true, perform integral over r in log space
+
         kwargs: dict
             options passed to either interp_sync_init, j_ic, or j_grey_body
             depending on value of 'which'
@@ -734,15 +774,17 @@ class CrabSSC3D(object):
         Returns
         -------
         2D array with intensity as function of frequency nu and theta
-        and the theta array
+        the theta array, and the volume emissivity array
         """
         if isinstance(theta, int):
             theta_arcmin = np.linspace(0., self.theta_max_arcmin() * 0.99, theta)
         else:
             theta_arcmin = theta
 
-        # build the array over radius
-        r = np.linspace(r_min, self._r0, r_steps)
+        if log:
+            r = np.logspace(np.log10(r_min), np.log10(self._r0), r_steps)
+        else:
+            r = np.linspace(r_min, self._r0, r_steps)
 
         tt, rr = np.meshgrid(theta_arcmin, r, indexing='ij')
         _, tntn = np.meshgrid(nu, theta_arcmin, indexing='ij')
@@ -776,7 +818,7 @@ class CrabSSC3D(object):
             j = self.j_grey_body(nnn, xxx, **kwargs)
 
         elif which == 'ic':
-            if self._j_sync_interp is None:
+            if self._j_ic_interp is None:
                 self.j_ic(nu, r, **kwargs)
             j = np.exp(self._j_ic_interp(np.log(nnn), xxx, grid=False))
 
@@ -787,7 +829,264 @@ class CrabSSC3D(object):
         # Since j_nu is in ergs / s / cm^3 / sr / Hz
         # the result is now in ergs / s / cm^2 / sr /Hz
         # the extra cos factor comes from the substitution from s to r
-        I_nu = simps(j, rrr, axis=-1) / np.cos(tntn * arcmin2rad)
-        return I_nu, theta_arcmin
+        if log:
+            if integration_mode == 'romb':
+                I_nu = romb(j * rrr, dx=np.diff(r)[0], axis=-1) / np.cos(tntn * arcmin2rad)
+            else:
+                I_nu = simps(j * rrr, np.log(rrr), axis=-1) / np.cos(tntn * arcmin2rad)
+        else:
+            if integration_mode == 'romb':
+                I_nu = romb(j, dx=np.diff(r)[0], axis=-1) / np.cos(tntn * arcmin2rad)
+            else:
+                I_nu = simps(j, rrr, axis=-1) / np.cos(tntn * arcmin2rad)
+        return I_nu, theta_arcmin, j
 
+    def intensity2(self, nu, theta,
+                   which='sync',
+                   r_steps=129,
+                   r_min=0.,
+                   log=False,
+                   integration_mode='simps',
+                   **kwargs):
+        """
+        Compute the specific intensity
+        as a line of sight integral over the volume emissivity
+        for different angular separations theta
+
+        Parameters
+        ----------
+        nu: array-like
+            Array with frequencies in Hz
+
+        theta: int or array-like
+            Angular separation for which intensity is calculated.
+            If integer, use linear spacing between 0 and angular separation
+            of r0 (given distance d).
+            If array, it gives the angular separation in arcmin
+
+        r_steps: int
+            steps used for integration over r
+
+        r_min: float
+            minimum radius considered for line of sight integration
+
+        which: str
+            specify for which radiation you want to calculate the
+            intensity. Either 'sync', 'ic', or 'dust'
+
+        log: bool
+            If true, perform integral over r in log space
+
+        integration_mode: str
+            specify which integration method to use; either 'simps' or 'romb'
+
+        kwargs: dict
+            options passed to either interp_sync_init, j_ic, or j_grey_body
+            depending on value of 'which'
+
+        Returns
+        -------
+        2D array with intensity as function of frequency nu and theta
+        the theta array, and the volume emissivity array
+        """
+        if isinstance(theta, int):
+            theta_arcmin = np.linspace(0., self.theta_max_arcmin() * 0.99, theta)
+        else:
+            theta_arcmin = theta
+
+        # build the integration array
+        rr = np.zeros((theta_arcmin.size, r_steps))
+        if log:
+            r = np.logspace(np.log10(r_min), np.log10(self._r0), r_steps)
+        else:
+            r = np.linspace(r_min, self._r0, r_steps)
+
+        for i, t in enumerate(theta_arcmin):
+
+            # lower integration bound
+            r_int_min = np.min([r_min, self._d * np.sin(t * arcmin2rad)])
+            if log:
+                rr[i] = np.logspace(np.log10(r_int_min), np.log10(self._r0), r_steps)
+            else:
+                rr[i] = np.linspace(r_min, self._r0, r_steps)
+
+        # build 3D arrays over nu, r
+        tt, _ = np.meshgrid(theta_arcmin, r, indexing='ij')
+
+        # build 3D arrays over nu, theta, r
+        nnn = np.tile(nu[:, np.newaxis, np.newaxis], list(rr.shape))
+        rrr = np.rollaxis(np.tile(rr[..., np.newaxis], list(nu.shape)), -1)
+        ttt = np.rollaxis(np.tile(tt[..., np.newaxis], list(nu.shape)), -1)
+
+        _, tntn = np.meshgrid(nu, theta_arcmin, indexing='ij')
+
+        # build the array over the line of sight
+        # within the nebula
+        sss = (self._d - rrr) / np.cos(ttt * arcmin2rad)
+
+        # the interpolation of the emissivity
+        # is over nu and r
+        # thus, for each point along the line of sight
+        # you need to calculate the corresponding distance to the nebula center
+        xxx = np.sqrt(sss ** 2. + self._d ** 2. - 2. * self._d * sss * np.cos(ttt * arcmin2rad))
+
+        # get the volume emissivity
+        if which == 'sync':
+            if self._j_sync_interp is None:
+                self.interp_sync_init(r_min=r.min(), r_max=r.max(), **kwargs)
+
+            if self._use_fast_interp:
+                j = np.exp(self._j_sync_interp(np.log(nnn), xxx))
+            else:
+                j = np.exp(self._j_sync_interp(np.log(nnn), xxx, grid=False))
+
+        elif which == 'dust':
+            j = self.j_grey_body(nnn, xxx, **kwargs)
+
+        elif which == 'ic':
+            if self._j_ic_interp is None:
+                self.j_ic(nu, r, **kwargs)
+            j = np.exp(self._j_ic_interp(np.log(nnn), xxx, grid=False))
+
+        else:
+            raise ValueError("Unknown value provided for 'which'. Options are 'sync', 'dust', or 'ic'")
+
+        # integrate
+        # Since j_nu is in ergs / s / cm^3 / sr / Hz
+        # the result is now in ergs / s / cm^2 / sr /Hz
+        # the extra cos factor comes from the substitution from s to r
+        if log:
+            if integration_mode == 'romb':
+                I_nu = 2. * romb(j * rrr, dx=np.diff(r)[0], axis=-1) / np.cos(tntn * arcmin2rad)
+            else:
+                I_nu = 2. * simps(j * rrr, np.log(rrr), axis=-1) / np.cos(tntn * arcmin2rad)
+        else:
+            if integration_mode == 'romb':
+                I_nu = 2. * romb(j, dx=np.diff(r)[0], axis=-1) / np.cos(tntn * arcmin2rad)
+            else:
+                I_nu = 2. * simps(j, rrr, axis=-1) / np.cos(tntn * arcmin2rad)
+        return I_nu, theta_arcmin, j
+
+    def flux(self,
+             nu, theta_edges,
+             which='sync',
+             r_steps=129,
+             r_min=0.,
+             theta_steps=17,
+             log=False,
+             integration_mode='simps',
+             **kwargs):
+        """
+        Compute the specific flux within some solid angle
+        as a line of sight integral over the volume emissivity
+        for different angular separations theta
+
+        Parameters
+        ----------
+        nu: array-like
+            Array with frequencies in Hz
+
+        theta_edges: array-like
+            Edges for angular separation within which flux is calculated as an integral
+            of the specific intensity .
+            Gives in arcmin
+
+        r_steps: int
+            steps used for integration over r for intensity calculation
+
+        r_min: float
+            minimum radius considered for line of sight integration for
+            intensity
+
+        theta_steps: int
+            steps used for integration over solid angle between edges
+
+        which: str
+            specify for which radiation you want to calculate the
+            intensity. Either 'sync', 'ic', or 'dust'
+
+        log: bool
+            If true, perform integral over r in log space
+
+        integration_mode: str
+            specify which integration method to use; either 'simps' or 'romb'
+
+        kwargs: dict
+            options passed to either interp_sync_init, j_ic, or j_grey_body
+            depending on value of 'which'
+
+        Returns
+        -------
+        2D array with flux as function of frequency nu within the theta integration edges
+        """
+
+        # first, build a theta array for integration over edges
+        theta_array = []
+        dtheta_array = []
+
+        kernel = []
+        for i, t in enumerate(theta_edges[:-1]):
+            if log:
+                x = np.linspace(np.log10(t),
+                                np.log10(theta_edges[i+1]),
+                                theta_steps)
+
+                I_nu, _, _ = self.intensity2(nu, 10.**x,
+                                             r_min=r_min,
+                                             r_steps=r_steps,
+                                             log=log,
+                                             integration_mode=integration_mode,
+                                             which=which,
+                                             **kwargs)
+            else:
+                x = np.linspace(t,
+                                theta_edges[i+1],
+                                theta_steps)
+
+                I_nu, _, _ = self.intensity2(nu, x,
+                                             r_min=r_min,
+                                             r_steps=r_steps,
+                                             log=log,
+                                             integration_mode=integration_mode,
+                                             which=which,
+                                             **kwargs)
+
+            theta_array.append(x)
+            dtheta_array.append(np.diff(x)[0])
+            kernel.append(I_nu)
+
+            if log:
+                kernel[-1] *= 10.**x * arcmin2rad
+
+                kernel[-1] *= np.cos(10.**x * arcmin2rad)
+                kernel[-1] *= np.sin(10.**x * arcmin2rad)
+
+            else:
+                kernel[-1] *= np.cos(x * arcmin2rad)
+                kernel[-1] *= np.sin(x * arcmin2rad)
+
+        # perform integration
+        if log:
+            theta_array = np.exp(theta_array)
+        else:
+            theta_array = np.array(theta_array)
+        dtheta_array = np.array(dtheta_array)
+
+        theta_array *= arcmin2rad
+        dtheta_array *= arcmin2rad
+        kernel = np.array(kernel)
+
+        if integration_mode == 'romb':
+            flux = []
+            for i, k in enumerate(kernel):
+                y = romb(k, dx=dtheta_array[i])
+                flux.append(y)
+            flux = np.array(flux)
+        else:
+            # stack theta array to match dimensin of mu
+            theta_array = np.tile(theta_array[:, np.newaxis, :], (1, kernel.shape[1], 1))
+            flux = simps(kernel, theta_array, axis=-1)
+
+        flux *= 2. * np.pi
+        return np.squeeze(flux)
 

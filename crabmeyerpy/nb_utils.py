@@ -26,6 +26,23 @@ def multi_5dim_simps(y, x):
 
 
 @nb.njit(parallel=True,fastmath=True,error_model='numpy')
+def multi_5dim_romb(y, x):
+    """
+    Perform romberg integration over last axis of a 5d array
+    using numba assuming non-uniform spacing
+    """
+    result = np.empty(y.shape[:-1], dtype=y.dtype)
+
+    for i in nb.prange(y.shape[0]):
+        for j in range(y.shape[1]):
+            for k in range(y.shape[2]):
+                for l in range(y.shape[3]):
+                    dx = np.diff(x[i, j, k, l])[0]  # dx spacing must be regular
+                    result[i, j, k, l] = romb_nb_1d(y[i, j, k, l], dx)
+    return result
+
+
+@nb.njit(parallel=True,fastmath=True,error_model='numpy')
 def multi_5dim_simps_even_spacing(y, x):
     """
     Perform simpson integration over last axis of a 5d array
@@ -160,6 +177,49 @@ def simpson_nonuniform(x, f):
                      / ( 6 * h[N - 2] * ( h[N - 2] + h[N - 1] ) )
     return result
 
+
+@nb.njit(fastmath=True)
+def romb_nb_1d(y, dx):
+    """
+    Parameters
+    ----------
+    y : array_like
+        A vector of ``2**k + 1`` equally-spaced samples of a function.
+    dx : float, optional
+        The sample spacing
+    """
+    Nsamps = y.size
+    Ninterv = Nsamps - 1
+    n = 1
+    k = 0
+    while n < Ninterv:
+        n <<= 1
+        k += 1
+    if n != Ninterv:
+        raise ValueError("Number of samples must be one plus a "
+                         "non-negative power of 2.")
+
+    R = np.zeros((k + 1, k + 1))
+
+    h = Ninterv * dx
+    R[0, 0] = (y[0] + y[-1]) / 2.0 * h
+
+    start = stop = step = Ninterv
+
+    for i in range(1, k + 1):
+        start >>= 1
+        slice_R = (slice(start, stop, step),)
+
+        R[i, 0] = 0.5 * (R[i - 1, 0] + h * y[slice_R].sum())
+
+        step >>= 1
+        for j in range(1, i + 1):
+            prev = R[i, j - 1]
+            R[i, j] = prev + (prev - R[i - 1, j - 1]) / ((1 << (2 * j)) - 1)
+
+        h /= 2.0
+
+    return R[k, k]
 
 @nb.njit('void(double[:], double[:], double)', fastmath=True)
 def black_body_nb(result, eps, T):
