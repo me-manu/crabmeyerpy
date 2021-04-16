@@ -95,6 +95,9 @@ class CrabSSC3D(object):
                  nu_sync_min=1e7, nu_sync_max=1e30,
                  integration_mode="scipy_simps",
                  log_level="INFO",
+                 ic_sync=True,
+                 ic_dust=True,
+                 ic_cmb=True,
                  use_fast_interp=False):
         """
         Initialize the class
@@ -103,16 +106,12 @@ class CrabSSC3D(object):
         ----------
         config: str or dict
             path to config file with model parameters.
-            Should contain three dictionaries:
-            - params_n_el: parameters for the electron density
-            - params_n_seed: parameters for the photon density
-            - params_B: parameters for the magnetic field
 
         n_el: function pointer
-            electron density spectrum. Should be called with n_el(gamma, r, **params_n_el)
+            electron density spectrum. Should be called with n_el(gamma, r, **config)
 
         B: function pointer
-            magnetic field of the nebula in G. Should be called with B(r, **params_B)
+            magnetic field of the nebula in G. Should be called with B(r, **config)
 
         d_kpc: float
             distance to the nebula in kpc
@@ -126,6 +125,15 @@ class CrabSSC3D(object):
         nu_sync_max: float
             maximum frequency considered for syncrotron radiation
 
+        ic_sync: bool
+            if True, include synchrotron radiation as seed field for inverse Compton scattering
+
+        ic_dust: bool
+            if True, include dust emission as seed field for inverse Compton scattering
+
+        ic_cmb: bool
+            if True, include CMB as seed field for inverse Compton scattering
+
         integration_mode: str
             specify how you want to compute your integrals.
             Options are:
@@ -136,14 +144,14 @@ class CrabSSC3D(object):
 
         # read in config file
         if isinstance(config, dict):
-            conf = config
+            self._parameters = config
         else:
             with open(config) as f:
-                conf = yaml.safe_load(f)
+                self._parameters = yaml.safe_load(f)
 
-        self._params_n_el = conf['params_n_el']
-        self._params_n_seed = conf['params_n_seed']
-        self._params_B = conf['params_B']
+        self._ic_sync = ic_sync
+        self._ic_dust = ic_dust
+        self._ic_cmb = ic_cmb
 
         self._nu_sync_min = nu_sync_min
         self._nu_sync_max = nu_sync_max
@@ -200,16 +208,20 @@ class CrabSSC3D(object):
         logging.addLevelName(logging.ERROR, "\033[1;41m%s\033[1;0m" % logging.getLevelName(logging.ERROR))
 
     @property
-    def params_n_el(self):
-        return self._params_n_el
+    def parameters(self):
+        return self._parameters
 
     @property
-    def params_n_seed(self):
-        return self._params_n_seed
+    def ic_sync(self):
+        return self._ic_sync
 
     @property
-    def params_B(self):
-        return self._params_B
+    def ic_cmb(self):
+        return self._ic_cmb
+
+    @property
+    def ic_dust(self):
+        return self._ic_dust
 
     @property
     def n_el(self):
@@ -279,6 +291,18 @@ class CrabSSC3D(object):
         else:
             raise ValueError("Unknown integration mode chosen")
 
+    @ic_sync.setter
+    def ic_sync(self, ic_sync):
+        self._ic_sync = ic_sync
+
+    @ic_cmb.setter
+    def ic_cmb(self, ic_cmb):
+        self._ic_cmb = ic_cmb
+
+    @ic_dust.setter
+    def ic_dust(self, ic_dust):
+        self._ic_dust = ic_dust
+
     def j_sync(self, nu, r, g_steps=65, gmin=None, gmax=None, g_axis=2, integration_mode='simps'):
         """
         Computes the spectral volume emissivity j_nu = j(nu, r) = dE / (dt dV dnu dOmega) for synchrotron radiation
@@ -312,9 +336,9 @@ class CrabSSC3D(object):
         array with spectral luminosity F_nu  density at frequency nu
         """
         if gmin is None:
-            gmin = self._params_n_el['gradio_min']
+            gmin = self._parameters['gradio_min']
         if gmax is None:
-            gmax = self._params_n_el['gwind_max']
+            gmax = self._parameters['gwind_max']
 
         # 3d grid for Freq, gamma factors, and r values
         log_g = linspace(log(gmin), log(gmax), g_steps)
@@ -339,7 +363,7 @@ class CrabSSC3D(object):
 
         # x = nu / nu_c as 2d grid,
         # nu_c: critical frequency for B in G; Longair vol.2 p. 261
-        nu_c = 4.199e10 * self._B(rrr, **self._params_B) * u.G.to('T') * exp(ggg)**2.
+        nu_c = 4.199e10 * self._B(rrr, **self._parameters) * u.G.to('T') * exp(ggg)**2.
         x = nnn / nu_c
 
         # define a mask for integration
@@ -354,7 +378,7 @@ class CrabSSC3D(object):
 
         # electron spectrum
         # dN / dV d gamma
-        result[m] *= self._n_el(exp(ggg[m]), rrr[m], **self._params_n_el)
+        result[m] *= self._n_el(exp(ggg[m]), rrr[m], **self._parameters)
 
         # integrate over gamma
         if integration_mode == 'romb':
@@ -373,7 +397,7 @@ class CrabSSC3D(object):
         # this is equal to 2.344355730864404e-22
 
         # average over all pitch angles gives 2/3
-        result *= self._B(rr, **self._params_B) * sqrt(2.0/3.0)
+        result *= self._B(rr, **self._parameters) * sqrt(2.0/3.0)
 
         # Together with electron spectrum, this has now units
         # erg / Hz / s / cm^3, i.e. is the Volume emissivity
@@ -452,10 +476,10 @@ class CrabSSC3D(object):
         t0 = time.time()
         if self._use_fast_interp:
             result = np.zeros(nn.flatten().size)
-            black_body_nb(result, nn.flatten() / eV2Hz, self._params_n_seed['dust_T'])
+            black_body_nb(result, nn.flatten() / eV2Hz, self._parameters['dust_T'])
             result = result.reshape(nn.shape)
         else:
-            result = black_body(nn / eV2Hz, self._params_n_seed['dust_T'])
+            result = black_body(nn / eV2Hz, self._parameters['dust_T'])
         t1 = time.time()
         self._logger.debug(f"Black body calculation in grey body function took {t1 - t0:.3f}s")
 
@@ -472,10 +496,10 @@ class CrabSSC3D(object):
         result *= self._d * self._d * 4. * np.pi
 
         # multiply with spatial dependence, norm is in units of 1/cm^3
-        result *= self._params_n_seed['dust_norm']
+        result *= self._parameters['dust_norm']
 
         # multiply with gaussian extension
-        sigma = tan(self._params_n_seed['dust_extension'] * arcmin2rad) * self._d
+        sigma = tan(self._parameters['dust_extension'] * arcmin2rad) * self._d
 
         t2 = time.time()
         # using numba here does not buy as anything in time
@@ -521,8 +545,8 @@ class CrabSSC3D(object):
 
         t0 = time.time()
         r_max = np.max([r.max(), 1. * self._r0])
-        if 'r_shock' in self._params_n_el:
-            r_min = self._params_n_el['r_shock']
+        if 'r_shock' in self._parameters:
+            r_min = self._parameters['r_shock']
         else:
             r_min = np.min([r.min(), 1e-5])
 
@@ -544,7 +568,7 @@ class CrabSSC3D(object):
         j_nu = np.full(ee.shape, 1e-40, dtype=np.float64)
         t1 = time.time()
 
-        if self._params_n_seed['ic_sync']:
+        if self._ic_sync:
 
             # initialize synchrotron interpolation
             if self._j_sync_interp is None:
@@ -591,7 +615,7 @@ class CrabSSC3D(object):
         else:
             phot_dens = np.full(eps.shape, 1e-40)
 
-        if self._params_n_seed['ic_dust']:
+        if self._ic_dust:
             # get dust volume emissivity in units of erg/s/cm^3/Hz/sr
             t01 = time.time()
             j_dust = self.j_grey_body(ee * eV2Hz, yy * r_max)
@@ -648,7 +672,7 @@ class CrabSSC3D(object):
         """
 
         t0 = time.time()
-        log_g = linspace(log(self._params_n_el['gmin']), log(self._params_n_el['gmax']), g_steps)
+        log_g = linspace(log(self._parameters['gmin']), log(self._parameters['gmax']), g_steps)
         gamma = exp(log_g)
 
         # generate the arrays for observed freq nu, gamma factor, radius, and energy of photon field
@@ -671,12 +695,12 @@ class CrabSSC3D(object):
         t1 = time.time()
         # calculate photon densities:
         # these are in photons / eV / cm^3
-        if self._params_n_seed['ic_sync'] or self._params_n_seed['ic_dust']:
+        if self._ic_sync or self._ic_dust:
             phot_dens = self.phot_dens(exp(log_eee), rrr, r1_steps=r1_steps)
         else:
             phot_dens = np.full(log_eee.shape, 1e-40)
 
-        if self._params_n_seed['ic_cmb']:
+        if self._parameters['ic_cmb']:
             phot_dens += black_body(exp(log_eee), cosmo.Tcmb0.value)
 
         t2 = time.time()
@@ -698,7 +722,7 @@ class CrabSSC3D(object):
         # only doing this with simps integration since
         # log_eee spacing is not constant
         kernel_out = simps(kernel_in, log_eee, axis=2)
-        kernel_out *= self._n_el(exp(gg), rr, **self._params_n_el) / exp(gg) ** 2.
+        kernel_out *= self._n_el(exp(gg), rr, **self._parameters) / exp(gg) ** 2.
 
         # integrate over electron gamma factor
         self._logger.debug(f"kernel shape for integration over gamma factor: {kernel_out.shape}")
