@@ -98,6 +98,7 @@ class CrabSSC3D(object):
                  ic_sync=True,
                  ic_dust=True,
                  ic_cmb=True,
+                 dust_radial_dependence='gauss',
                  use_fast_interp=False):
         """
         Initialize the class
@@ -134,6 +135,9 @@ class CrabSSC3D(object):
         ic_cmb: bool
             if True, include CMB as seed field for inverse Compton scattering
 
+        dust_radial_dependence: str
+            Radial dependence of dust, either 'gauss' or 'const'
+
         integration_mode: str
             specify how you want to compute your integrals.
             Options are:
@@ -152,6 +156,8 @@ class CrabSSC3D(object):
         self._ic_sync = ic_sync
         self._ic_dust = ic_dust
         self._ic_cmb = ic_cmb
+
+        self._dust_radial_dependence = dust_radial_dependence
 
         self._nu_sync_min = nu_sync_min
         self._nu_sync_max = nu_sync_max
@@ -224,6 +230,10 @@ class CrabSSC3D(object):
         return self._ic_dust
 
     @property
+    def dust_radial_dependence(self):
+        return self._dust_radial_dependence
+
+    @property
     def n_el(self):
         return self._n_el
 
@@ -275,6 +285,10 @@ class CrabSSC3D(object):
     @use_fast_interp.setter
     def use_fast_interp(self, use_fast_interp):
         self._use_fast_interp = use_fast_interp
+
+    @dust_radial_dependence.setter
+    def dust_radial_dependence(self, dust_radial_dependence):
+        self._dust_radial_dependence = dust_radial_dependence
 
     def _set_integration_mode(self):
         """Set the method for integrating multi dimension arrays"""
@@ -458,7 +472,6 @@ class CrabSSC3D(object):
         r: array-like
             distance from the nebula center in cm
 
-
         Returns
         -------
         array with grey body flux in erg/s/cm^2/Hz/sr
@@ -502,15 +515,13 @@ class CrabSSC3D(object):
         sigma = tan(self._parameters['dust_extension'] * arcmin2rad) * self._d
 
         t2 = time.time()
-        # using numba here does not buy as anything in time
-        #if self._use_fast_interp:
-        #    extension = np.zeros(result.flatten().size)
-        #    radial_gaussian_nb(extension, rr.flatten(), sigma)
-        #    result *= extension.reshape(result.shape)
-        #else:
-        #    extension = np.exp(-rr ** 2. / 2. / sigma ** 2.)
-        #    result *= extension
-        result *= np.exp(-rr ** 2. / 2. / sigma ** 2.)
+
+        if self._dust_radial_dependence == 'gauss':
+            result *= np.exp(-rr ** 2. / 2. / sigma ** 2.)
+        elif self._dust_radial_dependence == 'const':
+            mask = rr > sigma
+            result[mask] = 1e-60
+
         t3 = time.time()
         self._logger.debug(f"extension calculation in grey body function took {t3 - t2:.3f}s")
 
@@ -545,23 +556,9 @@ class CrabSSC3D(object):
 
         t0 = time.time()
         r_max = np.max([r.max(), 1. * self._r0])
-        if 'r_shock' in self._parameters:
-            r_min = self._parameters['r_shock']
-        else:
-            r_min = np.min([r.min(), 1e-5])
+        r_min = np.min([r.min(), 1e-5])
 
-        # radius for integration of photon emissivity
-        r1 = np.logspace(np.log10(r_min), np.log10(r_max), r1_steps)
-        #r1 = np.linspace(r_min, r_max, r1_steps)
-
-        # stack the eps array along new r1 axis
-        ee = np.tile(eps[..., np.newaxis], list(r1.shape))
-        rr = np.tile(r[..., np.newaxis], list(r1.shape))
-        r1r1 = np.tile(r1, list(eps.shape) + [1])
-        yy = r1r1 / r_max
-        xx = rr / r_max
-
-        y = r1 / r_max
+        ee, xx, y, yy = self._get_integration_arrays(eps, r, r1_steps, r_max, r_min)
 
         # photon emissivity
         #j_nu = np.full(ee.shape, 1e-10, dtype=np.float32)
@@ -569,6 +566,11 @@ class CrabSSC3D(object):
         t1 = time.time()
 
         if self._ic_sync:
+
+            # for KC model: emissitivity is 0 for r < r0,
+            # change r1 integration array to accomodate for this
+            if 'r_shock' in self._parameters:
+                _, xx, y, yy = self._get_integration_arrays(eps, r, r1_steps, r_max, self._parameters['r_shock'])
 
             # initialize synchrotron interpolation
             if self._j_sync_interp is None:
@@ -593,7 +595,7 @@ class CrabSSC3D(object):
             # Now in units of photons/s/Hz/cm^3/sr
             j_nu[m] /= ee[m] * eV2erg
 
-            # convert in units of photons/eV/cm^3/s
+            # convert in units of photons/eV/cm^3/s/sr
             j_nu[m] *= eV2Hz
 
             # seed photon density at distance r now calculated
@@ -612,6 +614,10 @@ class CrabSSC3D(object):
             phot_dens *= 0.5 * r_max / c.c.cgs.value
             t3 = time.time()
 
+            self._logger.debug("phot_dens: time for interpolation of Sync: {0:.3f}s,"
+                               " time for integration of SSC component  {1:.3f}s, "
+                               " time for filling arrays {2:.3f}s ".format(t2-t1, t3 - t2, t1 - t0))
+
         else:
             phot_dens = np.full(eps.shape, 1e-40)
 
@@ -628,7 +634,15 @@ class CrabSSC3D(object):
             j_dust *= eV2Hz
 
             t02 = time.time()
+
+            # if KC model: change back
+            # x and y arrays for dust component,
+            # since dust is assumed to be present even in r < r_shock
+            if 'r_shock' in self._parameters:
+                _, xx, y, yy = self._get_integration_arrays(eps, r, r1_steps, r_max, r_min)
+
             kernel_dust = j_dust * kernel_r(yy, xx)
+
             #phot_dens_dust = simps(kernel_dust * yy, log(yy), axis=-1) * r_max * 0.5 / c.c.cgs.value
             if self._integration_mode == 'romb':
                 phot_dens_dust = romb(kernel_dust * yy, dx=np.diff(log(y))[0], axis=-1)
@@ -641,15 +655,30 @@ class CrabSSC3D(object):
             self._logger.debug("time to calculate grey body {0:.3f}s "
                          " time for integration of dust component  {1:.3f}s".format(t02-t01, t03 - t02))
 
-        self._logger.debug("phot_dens: time for interpolation of Sync: {0:.3f}s,"
-                           " time for integration of SSC component  {1:.3f}s, "
-                           " time for filling arrays {2:.3f}s ".format(t2-t1, t3 - t2, t1 - t0))
-
-
         return phot_dens
+
+    @staticmethod
+    def _get_integration_arrays(eps, r, r1_steps, r_max, r_min):
+        """
+        Set up integration arrays for integrations performed
+        in photon density calculation
+        """
+
+        # radius for integration of photon emissivity
+        r1 = np.logspace(np.log10(r_min), np.log10(r_max), r1_steps)
+        # stack the eps array along new r1 axis
+
+        ee = np.tile(eps[..., np.newaxis], list(r1.shape))
+        rr = np.tile(r[..., np.newaxis], list(r1.shape))
+        r1r1 = np.tile(r1, list(eps.shape) + [1])
+        yy = r1r1 / r_max
+        xx = rr / r_max
+        y = r1 / r_max
+        return ee, xx, y, yy
 
     def j_ic(self, nu, r, g_steps=129, e_steps=129, r1_steps=33, integration_mode='simps'):
         """
+
         Spectral luminosity F_nu in erg/s/Hz/cm^2 for inverse Compton scattering.
 
         Parameters:
@@ -700,7 +729,7 @@ class CrabSSC3D(object):
         else:
             phot_dens = np.full(log_eee.shape, 1e-40)
 
-        if self._parameters['ic_cmb']:
+        if self._ic_cmb:
             phot_dens += black_body(exp(log_eee), cosmo.Tcmb0.value)
 
         t2 = time.time()
