@@ -518,9 +518,14 @@ class CrabSSC3D(object):
 
         if self._dust_radial_dependence == 'gauss':
             result *= np.exp(-rr ** 2. / 2. / sigma ** 2.)
-        elif self._dust_radial_dependence == 'const':
-            mask = rr > sigma
-            result[mask] = 1e-60
+
+        elif self._dust_radial_dependence == 'shell':
+            rmin = tan(self._parameters['min_dust_extension'] * arcmin2rad) * self._d
+            mask = (rr <= sigma) & (rr >= rmin)
+            # divide by dust volume, i.e., normalization parameter dust_norm is unit less in this case
+            volume = 4. / 3. * np.pi * (sigma - rmin) ** 3.
+            result /= volume
+            result[~mask] = 0.
 
         t3 = time.time()
         self._logger.debug(f"extension calculation in grey body function took {t3 - t2:.3f}s")

@@ -125,6 +125,60 @@ def nel_crab_wind(gamma, **params):
     return result
 
 
+def electron_distribution_width_old(gamma, **params):
+    """
+    Calculate the energy-dependent width of the electron distribution
+
+    Parameters
+    ----------
+    gamma: array-like
+        gamma values
+
+    params: dict
+        dict with parameters
+
+    Returns
+    -------
+    Width of electron distribution as a function of gamma
+    """
+
+    rho = np.zeros(gamma.shape)
+    # nebula size constant in energy for electron energies below 34 GeV
+    m = gamma < params['gamma_br_const']
+    rho[m] = params['radio_size_cm']
+    rho[~m] = params['offset'] + params['amplitude'] * np.power(gamma[~m] / params['gamma_br_const'], params['index'])
+
+    return rho
+
+
+def electron_distribution_width(gamma, **params):
+    """
+    Calculate the energy-dependent width of the electron distribution
+
+
+    Parameters
+    ----------
+    gamma: array-like
+        gamma values
+
+    params: dict
+        dict with parameters
+
+    Returns
+    -------
+    Width of electron distribution as a function of gamma
+    """
+
+    rho = np.zeros(gamma.shape)
+    # nebula size constant in energy for electron energies below 34 GeV
+    m = gamma < params['gamma_br_const']
+    rho[m] = params['radio_size_cm']
+    rho[~m] = params['radio_size_cm'] + params['amplitude'] * (
+            np.power(gamma[~m] / params['gamma_br_const'], params['index']) - 1.)
+
+    return rho
+
+
 def nel_crab_extension(r, gamma, **params):
     """
     Spatial distribution of electron density,
@@ -141,17 +195,11 @@ def nel_crab_extension(r, gamma, **params):
     -------
     spatial distribution
     """
-    rho = np.zeros(r.shape)
-    # nebula size constant in energy for electron energies below 34 GeV
-    m = gamma < params['gamma_br_const']
-    # calculate the scale length of the electrons "seeing" the photons according to Hillas et al. (1998)
-    # TODO: put in params instead of numbers; convert from arcmin to kpc?
-    rho[m] = params['radio_size_cm']
-
-    rho[~m] = params['offset'] + params['amplitude'] * np.power(gamma[~m] / params['gamma_br_const'], params['index'])
+    rho = electron_distribution_width(gamma, **params)
 
     result = np.exp(-r ** 2. / rho ** 2. / 2.)
     return result
+
 
 
 def vz_sq(z, sigma):
