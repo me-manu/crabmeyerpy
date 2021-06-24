@@ -175,6 +175,9 @@ def electron_distribution_width(gamma, **params):
     rho[m] = params['radio_size_cm']
     rho[~m] = params['radio_size_cm'] + params['amplitude'] * (
             np.power(gamma[~m] / params['gamma_br_const'], params['index']) - 1.)
+    
+    if "norm_spatial" in params:
+        rho *= params["norm_spatial"]
 
     return rho
 
