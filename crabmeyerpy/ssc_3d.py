@@ -199,6 +199,7 @@ class CrabSSC3D(object):
         xF[xF < 1e-40] = np.full(np.sum(xF < 1e-40), 1e-40)
         self.log_xF = interp1d(logx, np.log(xF))
         self._j_sync_interp = None
+        self._j_sync_interp_object = None
         self._j_ic_interp = None
 
         return
@@ -422,7 +423,12 @@ class CrabSSC3D(object):
         # returns value in unites erg/s/Hz/cm^3/sr
         return result
 
-    def interp_sync_init(self, r_min, r_max, nu_steps=100, g_steps=129, r_steps=50, integration_mode='simps'):
+    def interp_sync_init(self, r_min, r_max,
+                         nu_steps=100,
+                         g_steps=129,
+                         r_steps=50,
+                         interpolation_grid_r='log',
+                         integration_mode='simps'):
         """
         Initialize 2D interpolation of synchrotron emissivity j_nu in erg/s/Hz/cm^3/sr
         over frequency nu and radius  for given electron spectrum in log - log space.
@@ -438,26 +444,49 @@ class CrabSSC3D(object):
             number of steps in radius
         g_steps: int,
             number of integration steps for gamma
+        interpolation_grid_r: str
+            either 'log' or 'lin' for interpolation over logarithmic
+            or linear grid points
         """
         log_nu_intp, log_nu_intp_steps = np.linspace(np.log(self._nu_sync_min),
                                                      np.log(self._nu_sync_max),
                                                      nu_steps, retstep=True)
-        r_intp, r_intp_steps = np.linspace(r_min, r_max, r_steps, retstep=True)
-        log_nn, rr = np.meshgrid(log_nu_intp, r_intp, indexing='ij')
+        if interpolation_grid_r == 'lin':
+            r_intp, r_intp_steps = np.linspace(r_min, r_max, r_steps, retstep=True)
+            r = r_intp
+        else:
+            if r_min == 0.:
+                r_min = 1e-10
+            r_intp, r_intp_steps = np.linspace(np.log(r_min), np.log(r_max), r_steps, retstep=True)
+            r = np.exp(r_intp)
+
+        log_nn, rr = np.meshgrid(log_nu_intp, r, indexing='ij')
         j_sync = self.j_sync(np.exp(log_nn), rr, g_steps=g_steps, integration_mode=integration_mode)
 
         if self._use_fast_interp:
-            self._j_sync_interp = fast_interp2d([log_nu_intp[0], r_intp[0]],
-                                                [log_nu_intp[-1], r_intp[-1]],
-                                                [log_nu_intp_steps, r_intp_steps],
-                                                log(j_sync),
-                                                k=3,
-                                                p=[False, False],
-                                                c=[True, True],
-                                                e=[0, 0]
-                                                )
+            self._j_sync_interp_object = fast_interp2d([log_nu_intp[0], r_intp[0]],
+                                                       [log_nu_intp[-1], r_intp[-1]],
+                                                       [log_nu_intp_steps, r_intp_steps],
+                                                       log(j_sync),
+                                                       k=1,
+                                                       p=[False, False],
+                                                       c=[True, True],
+                                                       e=[0, 0]
+                                                       )
         else:
-            self._j_sync_interp = RectBivariateSpline(log_nu_intp, r_intp, log(j_sync), kx=3, ky=3, s=0)
+            #self._j_sync_interp_object = RectBivariateSpline(log_nu_intp, r_intp, log(j_sync), kx=3, ky=3, s=0)
+            self._j_sync_interp_object = RectBivariateSpline(log_nu_intp, r_intp, log(j_sync), kx=1, ky=1, s=0)
+
+        if interpolation_grid_r == 'lin':
+            if self._use_fast_interp:
+                self._j_sync_interp = lambda log_nu, r: self._j_sync_interp_object(log_nu, r)
+            else:
+                self._j_sync_interp = lambda log_nu, r: self._j_sync_interp_object(log_nu, r, grid=False)
+        else:
+            if self._use_fast_interp:
+                self._j_sync_interp = lambda log_nu, r: self._j_sync_interp_object(log_nu, np.log(r))
+            else:
+                self._j_sync_interp = lambda log_nu, r: self._j_sync_interp_object(log_nu, np.log(r), grid=False)
 
     def j_grey_body(self, nu, r):
         """
@@ -590,10 +619,14 @@ class CrabSSC3D(object):
             if self._use_fast_interp:
                 j_nu[m] = np.exp(self._j_sync_interp(
                     log(ee[m] * eV2Hz).flatten(),
-                    log(r_max * yy[m]).flatten()
+                    (r_max * yy[m]).flatten()
+                    #log(r_max * yy[m]).flatten()
                 )).reshape(ee[m].shape)
             else:
-                j_nu[m] = np.exp(self._j_sync_interp(log(ee[m] * eV2Hz), log(r_max * yy[m]), grid=False))
+                j_nu[m] = np.exp(self._j_sync_interp(log(ee[m] * eV2Hz),
+                                                     #log(r_max * yy[m]),
+                                                     r_max * yy[m],
+                                                     ))
 
             t2 = time.time()
             # conversion to photon emissivity in photons/s/cm^3/eV/sr
@@ -660,7 +693,9 @@ class CrabSSC3D(object):
             self._logger.debug("time to calculate grey body {0:.3f}s "
                          " time for integration of dust component  {1:.3f}s".format(t02-t01, t03 - t02))
 
-        return phot_dens
+        #return phot_dens
+        return phot_dens * 4. * np.pi
+
 
     @staticmethod
     def _get_integration_arrays(eps, r, r1_steps, r_max, r_min):
@@ -780,7 +815,8 @@ class CrabSSC3D(object):
 
         # interpolate result
         result[result <= 0] = 1e-100
-        self._j_ic_interp = RectBivariateSpline(log(nu), r, log(result), kx=3, ky=3, s=0)
+        #self._j_ic_interp = RectBivariateSpline(log(nu), log(r), log(result), kx=3, ky=3, s=0)
+        self._j_ic_interp = RectBivariateSpline(log(nu), r, log(result), kx=1, ky=1, s=0)
 
         return result
 
@@ -867,10 +903,7 @@ class CrabSSC3D(object):
             if self._j_sync_interp is None:
                 self.interp_sync_init(r_min=r.min(), r_max=r.max(), **kwargs)
 
-            if self._use_fast_interp:
-                j = np.exp(self._j_sync_interp(np.log(nnn), xxx))
-            else:
-                j = np.exp(self._j_sync_interp(np.log(nnn), xxx, grid=False))
+            j = np.exp(self._j_sync_interp(np.log(nnn), xxx))
 
         elif which == 'dust':
             j = self.j_grey_body(nnn, xxx, **kwargs)
@@ -878,6 +911,7 @@ class CrabSSC3D(object):
         elif which == 'ic':
             if self._j_ic_interp is None:
                 self.j_ic(nu, r, **kwargs)
+            #j = np.exp(self._j_ic_interp(np.log(nnn), np.log(xxx), grid=False))
             j = np.exp(self._j_ic_interp(np.log(nnn), xxx, grid=False))
 
         else:
@@ -903,7 +937,7 @@ class CrabSSC3D(object):
                    which='sync',
                    r_steps=129,
                    r_min=0.,
-                   log=False,
+                   log_r=False,
                    integration_mode='simps',
                    **kwargs):
         """
@@ -932,7 +966,7 @@ class CrabSSC3D(object):
             specify for which radiation you want to calculate the
             intensity. Either 'sync', 'ic', or 'dust'
 
-        log: bool
+        log_r: bool
             If true, perform integral over r in log space
 
         integration_mode: str
@@ -954,7 +988,9 @@ class CrabSSC3D(object):
 
         # build the integration array
         rr = np.zeros((theta_arcmin.size, r_steps))
-        if log:
+        if log_r:
+            if r_min == 0.:
+                r_min = 1e-10
             r = np.logspace(np.log10(r_min), np.log10(self._r0), r_steps)
         else:
             r = np.linspace(r_min, self._r0, r_steps)
@@ -963,7 +999,9 @@ class CrabSSC3D(object):
 
             # lower integration bound
             r_int_min = np.min([r_min, self._d * np.sin(t * arcmin2rad)])
-            if log:
+            if log_r:
+                if r_int_min == 0.:
+                    r_int_min = 1e-10
                 rr[i] = np.logspace(np.log10(r_int_min), np.log10(self._r0), r_steps)
             else:
                 rr[i] = np.linspace(r_min, self._r0, r_steps)
@@ -993,10 +1031,8 @@ class CrabSSC3D(object):
             if self._j_sync_interp is None:
                 self.interp_sync_init(r_min=r.min(), r_max=r.max(), **kwargs)
 
-            if self._use_fast_interp:
-                j = np.exp(self._j_sync_interp(np.log(nnn), xxx))
-            else:
-                j = np.exp(self._j_sync_interp(np.log(nnn), xxx, grid=False))
+            xxx[xxx == 0.] = 1e-10
+            j = np.exp(self._j_sync_interp(np.log(nnn), xxx))
 
         elif which == 'dust':
             j = self.j_grey_body(nnn, xxx, **kwargs)
@@ -1004,6 +1040,7 @@ class CrabSSC3D(object):
         elif which == 'ic':
             if self._j_ic_interp is None:
                 self.j_ic(nu, r, **kwargs)
+            #j = np.exp(self._j_ic_interp(np.log(nnn), np.log(xxx), grid=False))
             j = np.exp(self._j_ic_interp(np.log(nnn), xxx, grid=False))
 
         else:
@@ -1013,7 +1050,7 @@ class CrabSSC3D(object):
         # Since j_nu is in ergs / s / cm^3 / sr / Hz
         # the result is now in ergs / s / cm^2 / sr /Hz
         # the extra cos factor comes from the substitution from s to r
-        if log:
+        if log_r:
             if integration_mode == 'romb':
                 I_nu = 2. * romb(j * rrr, dx=np.diff(r)[0], axis=-1) / np.cos(tntn * arcmin2rad)
             else:
@@ -1031,7 +1068,7 @@ class CrabSSC3D(object):
              r_steps=129,
              r_min=0.,
              theta_steps=17,
-             log=False,
+             log_r=False,
              integration_mode='simps',
              **kwargs):
         """
@@ -1063,7 +1100,7 @@ class CrabSSC3D(object):
             specify for which radiation you want to calculate the
             intensity. Either 'sync', 'ic', or 'dust'
 
-        log: bool
+        log_r: bool
             If true, perform integral over r in log space
 
         integration_mode: str
@@ -1084,19 +1121,20 @@ class CrabSSC3D(object):
 
         kernel = []
         for i, t in enumerate(theta_edges[:-1]):
-            if log:
-                x = np.linspace(np.log10(t),
-                                np.log10(theta_edges[i+1]),
-                                theta_steps)
-
-                I_nu, _, _ = self.intensity2(nu, 10.**x,
-                                             r_min=r_min,
-                                             r_steps=r_steps,
-                                             log=log,
-                                             integration_mode=integration_mode,
-                                             which=which,
-                                             **kwargs)
-            else:
+            #if log_r:
+                #x = np.linspace(np.log10(t),
+                                #np.log10(theta_edges[i+1]),
+                                #theta_steps)
+#
+                #I_nu, _, _ = self.intensity2(nu, 10.**x,
+                                             #r_min=r_min,
+                                             #r_steps=r_steps,
+                                             #log_r=log_r,
+                                             #integration_mode=integration_mode,
+                                             #which=which,
+                                             #**kwargs)
+            #else:
+            if True:
                 x = np.linspace(t,
                                 theta_edges[i+1],
                                 theta_steps)
@@ -1104,7 +1142,7 @@ class CrabSSC3D(object):
                 I_nu, _, _ = self.intensity2(nu, x,
                                              r_min=r_min,
                                              r_steps=r_steps,
-                                             log=log,
+                                             log_r=log_r,
                                              integration_mode=integration_mode,
                                              which=which,
                                              **kwargs)
@@ -1113,20 +1151,22 @@ class CrabSSC3D(object):
             dtheta_array.append(np.diff(x)[0])
             kernel.append(I_nu)
 
-            if log:
-                kernel[-1] *= 10.**x * arcmin2rad
-
-                kernel[-1] *= np.cos(10.**x * arcmin2rad)
-                kernel[-1] *= np.sin(10.**x * arcmin2rad)
-
-            else:
+            #if log_r:
+                #kernel[-1] *= 10.**x * arcmin2rad
+#
+                #kernel[-1] *= np.cos(10.**x * arcmin2rad)
+                #kernel[-1] *= np.sin(10.**x * arcmin2rad)
+#
+            #else:
+            if True:
                 kernel[-1] *= np.cos(x * arcmin2rad)
                 kernel[-1] *= np.sin(x * arcmin2rad)
 
         # perform integration
-        if log:
-            theta_array = np.exp(theta_array)
-        else:
+        #if log_r:
+            #theta_array = np.exp(theta_array)
+        #else:
+        if True:
             theta_array = np.array(theta_array)
         dtheta_array = np.array(dtheta_array)
 
