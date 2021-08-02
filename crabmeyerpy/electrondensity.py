@@ -175,6 +175,9 @@ def electron_distribution_width(gamma, **params):
     rho[m] = params['radio_size_cm']
     rho[~m] = params['radio_size_cm'] + params['amplitude'] * (
             np.power(gamma[~m] / params['gamma_br_const'], params['index']) - 1.)
+    
+    if "norm_spatial" in params:
+        rho *= params["norm_spatial"]
 
     return rho
 
@@ -198,6 +201,10 @@ def nel_crab_extension(r, gamma, **params):
     rho = electron_distribution_width(gamma, **params)
 
     result = np.exp(-r ** 2. / rho ** 2. / 2.)
+    
+    if "norm_spatial" in params:
+        result /= params["norm_spatial"]**2  # keeps flux relatively constant when changing norm_spatial
+        
     return result
 
 
