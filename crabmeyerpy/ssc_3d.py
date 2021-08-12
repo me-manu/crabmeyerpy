@@ -426,6 +426,8 @@ class CrabSSC3D(object):
         return result
 
     def interp_sync_init(self, r_min, r_max,
+                         gmin=None,
+                         gmax=None,
                          nu_steps=100,
                          g_steps=129,
                          r_steps=80,
@@ -441,6 +443,10 @@ class CrabSSC3D(object):
             minimum radius for interpolation
         r_max: float
             maximum radius for interpolation
+        gmin: float or None
+            minimum lorentz factor
+        gmax: float or None
+            maximum lorentz factor
         r_steps: int,
             number of steps in radius
         g_steps: int,
@@ -455,7 +461,11 @@ class CrabSSC3D(object):
         r_intp, r_intp_steps = np.linspace(r_min, r_max, r_steps, retstep=True)
 
         log_nn, rr = np.meshgrid(log_nu_intp, r_intp, indexing='ij')
-        j_sync = self.j_sync(np.exp(log_nn), rr, g_steps=g_steps, integration_mode=integration_mode)
+        j_sync = self.j_sync(np.exp(log_nn), rr,
+                             gmin=gmin,
+                             gmax=gmax,
+                             g_steps=g_steps,
+                             integration_mode=integration_mode)
 
         if self._use_fast_interp:
             self._j_sync_interp_object = fast_interp2d([log_nu_intp[0], r_intp[0]],
