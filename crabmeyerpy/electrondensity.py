@@ -123,6 +123,26 @@ def nel_crab_radio_cutoff(gamma, **params):
     return result
 
 
+def nel_radio_extension_const(r, **params):
+    """
+    Constant extension for radio electrons
+    up to a radius radio_size_cm
+    """
+    result = np.zeros_like(r)
+    m = r < params['radio_size_cm']
+    result[m] = 1.
+    return result
+
+
+def nel_radio_extension_gauss(r, **params):
+    """
+    Gaussian extension for radio electrons
+    with width radio_size_cm
+    """
+    result = np.exp(-r**2. / 2. / params['radio_size_cm'])
+    return result
+
+
 def nel_crab_wind(gamma, **params):
     """
     Computes wind electron number spectrum per unit gamma interval dN / dgamma
@@ -237,7 +257,6 @@ def nel_crab_extension(r, gamma, **params):
         result /= params["norm_spatial"]**2  # keeps flux relatively constant when changing norm_spatial
         
     return result
-
 
 
 def vz_sq(z, sigma):
