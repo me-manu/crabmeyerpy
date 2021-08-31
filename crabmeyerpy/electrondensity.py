@@ -139,7 +139,7 @@ def nel_radio_extension_gauss(r, **params):
     Gaussian extension for radio electrons
     with width radio_size_cm
     """
-    result = np.exp(-r**2. / 2. / params['radio_size_cm'])
+    result = np.exp(-r**2. / 2. / params['radio_size_cm']**2)
     return result
 
 
