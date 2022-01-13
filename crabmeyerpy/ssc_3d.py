@@ -531,7 +531,7 @@ class CrabSSC3D(object):
 
         # Get the emissivity
         t0 = time.time()
-        result = self._j_dust(rr, nu, **self._parameters)
+        result = self._j_dust(rr, nn, **self._parameters)
         t1 = time.time()
         self._logger.debug(f"Dust calculation in j_dust_nebula function took {t1 - t0:.3f}s")
         # results in emissivity erg / s / Hz / cm^3 / sr
@@ -604,7 +604,7 @@ class CrabSSC3D(object):
             rmin = tan(self._parameters['min_dust_extension'] * arcmin2rad) * self._d
             mask = (rr <= sigma) & (rr >= rmin)
             # divide by dust volume, i.e., normalization parameter dust_norm is unit less in this case
-            volume = 4. / 3. * np.pi * (sigma - rmin) ** 3.
+            volume = 4. / 3. * np.pi * (sigma ** 3. - rmin ** 3.)
             result /= volume
             result[~mask] = 0.
 
@@ -754,7 +754,6 @@ class CrabSSC3D(object):
                          " time for integration of dust component  {1:.3f}s".format(t02-t01, t03 - t02))
 
         return phot_dens
-
 
     @staticmethod
     def _get_integration_arrays(eps, r, r1_steps, r_max, r_min):
