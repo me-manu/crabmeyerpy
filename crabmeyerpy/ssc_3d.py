@@ -91,6 +91,7 @@ class CrabSSC3D(object):
     def __init__(self, config,
                  n_el,
                  B,
+                 j_dust,
                  d_kpc=2., r0_pc=1.8,
                  nu_sync_min=1e7, nu_sync_max=1e30,
                  integration_mode="scipy_simps",
@@ -113,6 +114,10 @@ class CrabSSC3D(object):
 
         B: function pointer
             magnetic field of the nebula in G. Should be called with B(r, **config)
+
+        j_dust: function pointer
+            volume emissivity of the dust in the nebula in erg / s / cm^3 / Hz / sr.
+            Should be called with j_dust(r, nu, **config)
 
         d_kpc: float
             distance to the nebula in kpc
@@ -137,6 +142,7 @@ class CrabSSC3D(object):
 
         dust_radial_dependence: str
             Radial dependence of dust, either 'gauss' or 'const'
+            Note: this will be removed soon!
 
         integration_mode: str
             specify how you want to compute your integrals.
@@ -157,12 +163,14 @@ class CrabSSC3D(object):
         self._ic_dust = ic_dust
         self._ic_cmb = ic_cmb
 
+        # TODO: remove
         self._dust_radial_dependence = dust_radial_dependence
 
         self._nu_sync_min = nu_sync_min
         self._nu_sync_max = nu_sync_max
         self._n_el = n_el
         self._B = B
+        self._j_dust = j_dust
         self._d = d_kpc * kpc2cm
         self._r0 = r0_pc * kpc2cm / 1e3
         self._integration_mode = integration_mode
@@ -203,7 +211,6 @@ class CrabSSC3D(object):
         self._j_ic_interp = None
         self._phot_dens_sync_interp = None
 
-
         return
 
     def __init_logger(self, log_level):
@@ -234,6 +241,10 @@ class CrabSSC3D(object):
 
     @property
     def dust_radial_dependence(self):
+        """
+        Deprecated, only kept for checks!
+        """
+        # TODO: remove
         return self._dust_radial_dependence
 
     @property
@@ -243,6 +254,10 @@ class CrabSSC3D(object):
     @property
     def B(self):
         return self._B
+
+    @property
+    def j_dust(self):
+        return self._j_dust
 
     @property
     def d(self):
@@ -271,6 +286,10 @@ class CrabSSC3D(object):
     @B.setter
     def B(self, B):
         self._B = B
+
+    @j_dust.setter
+    def j_dust(self, j_dust):
+        self._j_dust = j_dust
 
     @d.setter
     def d(self, d):
@@ -485,10 +504,45 @@ class CrabSSC3D(object):
         else:
             self._j_sync_interp = lambda log_nu, r: self._j_sync_interp_object(log_nu, r, grid=False)
 
+    def j_dust_nebula(self, nu, r):
+        """
+        Return volume emissivity of grey body j_nu erg/s/cm^3/Hz/sr,
+
+        Parameters
+        ----------
+        nu: array like
+            array with frequencies in Hz
+
+        r: array-like
+            distance from the nebula center in cm
+
+        Returns
+        -------
+            array with grey body flux in erg/s/cm^3/Hz/sr
+        """
+
+        if len(nu.shape) == len(r.shape) == 1:
+            nn, rr = np.meshgrid(nu, r, indexing='ij')
+        elif len(nu.shape) > 1 and np.all(np.equal(nu.shape, r.shape)):
+            nn = nu
+            rr = r
+        else:
+            raise ValueError("nu and theta have inconsistent shapes")
+
+        # Get the emissivity
+        t0 = time.time()
+        result = self._j_dust(rr, nu, **self._parameters)
+        t1 = time.time()
+        self._logger.debug(f"Dust calculation in j_dust_nebula function took {t1 - t0:.3f}s")
+        # results in emissivity erg / s / Hz / cm^3 / sr
+        return result
+
     def j_grey_body(self, nu, r):
         """
         Return volume emissivity of grey body j_nu erg/s/cm^3/Hz/sr,
         assumes dust component to scale as radial gaussian from nebula center
+
+        Deprecated, only kept for checks!
 
         Parameters
         ----------
@@ -502,6 +556,7 @@ class CrabSSC3D(object):
         -------
         array with grey body flux in erg/s/cm^2/Hz/sr
         """
+        # TODO: remove
 
         if len(nu.shape) == len(r.shape) == 1:
             nn, rr = np.meshgrid(nu, r, indexing='ij')
@@ -663,7 +718,7 @@ class CrabSSC3D(object):
         if self._ic_dust:
             # get dust volume emissivity in units of erg/s/cm^3/Hz/sr
             t01 = time.time()
-            j_dust = self.j_grey_body(ee * eV2Hz, yy * r_max)
+            j_dust = self.j_dust_nebula(ee * eV2Hz, yy * r_max)
 
             # conversion to photon emissivity in photons/s/cm^3/eV/sr
             # Now in units of photons/s/Hz/cm^3/sr
@@ -887,7 +942,7 @@ class CrabSSC3D(object):
             intensity. Either 'sync', 'ic', or 'dust'
 
         kwargs: dict
-            options passed to either interp_sync_init, j_ic, or j_grey_body
+            options passed to either interp_sync_init, j_ic, or j_dust_nebula
             depending on value of 'which'
 
         Returns
@@ -931,7 +986,7 @@ class CrabSSC3D(object):
             j = np.exp(self._j_sync_interp(np.log(nnn), xxx))
 
         elif which == 'dust':
-            j = self.j_grey_body(nnn, xxx, **kwargs)
+            j = self.j_dust_nebula(nnn, xxx, **kwargs)
 
         elif which == 'ic':
             if self._j_ic_interp is None:
@@ -988,7 +1043,7 @@ class CrabSSC3D(object):
             specify which integration method to use; either 'simps' or 'romb'
 
         kwargs: dict
-            options passed to either interp_sync_init, j_ic, or j_grey_body
+            options passed to either interp_sync_init, j_ic, or j_dust_nebula
             depending on value of 'which'
 
         Returns
@@ -1040,7 +1095,7 @@ class CrabSSC3D(object):
             j = np.exp(self._j_sync_interp(np.log(nnn), xxx))
 
         elif which == 'dust':
-            j = self.j_grey_body(nnn, xxx, **kwargs)
+            j = self.j_dust_nebula(nnn, xxx, **kwargs)
 
         elif which == 'ic':
             if self._j_ic_interp is None:
@@ -1102,7 +1157,7 @@ class CrabSSC3D(object):
             specify which integration method to use; either 'simps' or 'romb'
 
         kwargs: dict
-            options passed to either interp_sync_init, j_ic, or j_grey_body
+            options passed to either interp_sync_init, j_ic, or j_dust_nebula
             depending on value of 'which'
 
         Returns
