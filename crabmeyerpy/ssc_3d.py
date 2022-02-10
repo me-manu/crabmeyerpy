@@ -1210,3 +1210,97 @@ class CrabSSC3D(object):
         flux *= 2. * np.pi
         return np.squeeze(flux)
 
+    def ext68(self,
+              nu,
+              which='sync',
+              r_steps=129,
+              r_min=0.,
+              theta_steps=20,
+              theta_steps_interp=500,
+              integration_mode='simps',
+              **kwargs):
+        """
+        Compute the 68% extension of the nebula
+        model from a 2D interpolation of the intensity.
+        as a line of sight integral over the volume emissivity
+        for different angular separations theta
+
+        Parameters
+        ----------
+        nu: array-like
+            Array with frequencies in Hz
+
+        r_steps: int
+            steps used for integration over r
+
+        r_min: float
+            minimum radius considered for line of sight integration
+
+        which: str
+            specify for which radiation you want to calculate the
+            intensity. Either 'sync', 'ic', or 'dust'
+
+        integration_mode: str
+            specify which integration method to use; either 'simps' or 'romb'
+
+        theta_steps: int
+            number of theta steps used to calculate intensity
+
+        theta_steps_interp: int
+            number of theta steps that interpolation is performed on
+
+        kwargs: dict
+            options passed to either interp_sync_init, j_ic, or j_dust_nebula
+            depending on value of 'which'
+
+        Returns
+        -------
+        Two arrays with frequencies and array with 68% extension for each frequency
+        """
+        # calculate the intensity along the line of sight
+        I_nu, theta_arcmin, _ = self.intensity2(nu,
+                                                r_min=r_min,
+                                                r_steps=r_steps,
+                                                theta=theta_steps,
+                                                which=which,
+                                                integration_mode=integration_mode,
+                                                **kwargs)
+
+        # interpolate the intensity
+        # restrict yourself to some values of frequency
+        # for numerical accuracy
+        if which == 'sync':
+            m = nu < 1e24
+        elif which == 'ic':
+            m = nu < 3e29
+        else:
+            m = np.ones(nu.size, dtype=bool)
+
+        if not np.sum(m):
+            raise ValueError("No valid nu range provided")
+
+        # perform interpolation
+        I_nu_interp = RectBivariateSpline(np.log10(nu[m]), theta_arcmin,
+                                          np.log10(I_nu[m, :]),
+                                          kx=2,
+                                          ky=2)
+
+        # compute a fine grid
+        t_test = np.linspace(theta_arcmin[0], theta_arcmin[-1], theta_steps_interp)
+        I_interp = 10. ** I_nu_interp(np.log10(nu[m]), t_test)
+
+        # calculate the fluxes between theta bounds,
+        # assuming I to be constant within bounds
+        dtheta = t_test[1:] - t_test[:-1]
+        f_interp = 0.5 * (I_interp[:, 1:] + I_interp[:, :-1]) * dtheta
+
+        # compute CDF from fluxes
+        cdf_interp = np.cumsum(f_interp, axis=1)
+        cdf_interp = (cdf_interp.T - cdf_interp.min(axis=1)).T
+        cdf_interp = (cdf_interp.T / cdf_interp.max(axis=1)).T
+
+        # compute 68% quantile from nearest index
+        idx68 = np.argmin(np.abs(cdf_interp - 0.68), axis=1)
+
+        # return the 68% extension
+        return nu[m], t_test[idx68]
