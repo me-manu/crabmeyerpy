@@ -233,6 +233,74 @@ def electron_distribution_width(gamma, **params):
     return rho
 
 
+def electron_distribution_width_bpl(gamma, **params):
+    """
+    Calculate the energy-dependent width of the electron distribution
+    as a power law.
+
+    The break of the power law is controlled by the maximum gamma
+    factor of the radio electrons, gradio_max.
+
+    Parameters
+    ----------
+    gamma: array-like
+        gamma values
+
+    params: dict
+        dict with parameters
+
+    Returns
+    -------
+    Width of electron distribution as a function of gamma
+    """
+
+    rho = np.zeros(gamma.shape)
+    # nebula size constant in energy for electron energies below 34 GeV
+    m = gamma < params['gradio_max']
+    rho[m] = params['radio_size_cm']
+    rho[~m] = np.power(gamma[~m] / params['gradio_max'], params['index'])
+    rho[~m] *= params['radio_size_cm']
+
+    if "norm_spatial" in params:
+        rho *= params["norm_spatial"]
+
+    return rho
+
+
+def electron_distribution_width_bpl_smooth(gamma, **params):
+    """
+    Calculate the energy-dependent width of the electron distribution
+    as a power law.
+
+    The break of the power law is controlled by the maximum gamma
+    factor of the radio electrons, gradio_max.
+
+    Parameters
+    ----------
+    gamma: array-like
+        gamma values
+
+    params: dict
+        dict with parameters
+
+    Returns
+    -------
+    Width of electron distribution as a function of gamma
+    """
+    params.setdefault("smooth", 2.)
+
+    rho = np.zeros(gamma.shape)
+    # nebula size constant in energy for electron energies below 34 GeV
+    rho = 1. + np.power(gamma / params['gradio_max'], params['smooth'])
+    rho = np.power(rho, params['index'] / params['smooth'])
+    rho *= params['radio_size_cm']
+
+    if "norm_spatial" in params:
+        rho *= params["norm_spatial"]
+
+    return rho
+
+
 def nel_crab_extension(r, gamma, **params):
     """
     Spatial distribution of electron density,
@@ -249,7 +317,9 @@ def nel_crab_extension(r, gamma, **params):
     -------
     spatial distribution
     """
-    rho = electron_distribution_width(gamma, **params)
+    #rho = electron_distribution_width(gamma, **params)
+    #rho = electron_distribution_width_bpl(gamma, **params)
+    rho = electron_distribution_width_bpl_smooth(gamma, **params)
 
     result = np.exp(-r ** 2. / rho ** 2. / 2.)
     
