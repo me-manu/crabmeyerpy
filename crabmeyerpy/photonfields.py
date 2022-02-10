@@ -41,8 +41,9 @@ def intensity_black_body(nu, T):
     Return array with specific intensity B_nu of black body in erg / s / Hz / cm^2 / sr
     """
     kx = c.h.value * nu / T / c.k_B.value
-    m = kx < 1e-8
     result = np.exp(kx) - 1.
+
+    # use taylor approximation for overflow
     m = result == 0.
     result[m] = kx[m] + kx[m] * kx[m] / 2. + kx[m] * kx[m] * kx[m] / 6.  # use taylor expansion - 1
 
