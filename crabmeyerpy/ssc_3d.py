@@ -908,7 +908,7 @@ class CrabSSC3D(object):
         Calculate the maximum angular extension of the nebula
         in arcmin
         """
-        theta_max = np.tan(self._r0 / self._d) / arcmin2rad
+        theta_max = np.arctan(self._r0 / self._d) / arcmin2rad
         return theta_max
 
     def intensity(self, nu, theta,
