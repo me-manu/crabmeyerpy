@@ -1292,7 +1292,11 @@ class CrabSSC3D(object):
         # calculate the fluxes between theta bounds,
         # assuming I to be constant within bounds
         dtheta = t_test[1:] - t_test[:-1]
+        theta_cen = 0.5 * (t_test[1:] + t_test[:-1])
         f_interp = 0.5 * (I_interp[:, 1:] + I_interp[:, :-1]) * dtheta
+
+        # multiply with remaining theta dependence of integrand
+        f_interp *= np.cos(theta_cen * arcmin2rad) * np.sin(theta_cen * arcmin2rad)
 
         # compute CDF from fluxes
         cdf_interp = np.cumsum(f_interp, axis=1)
