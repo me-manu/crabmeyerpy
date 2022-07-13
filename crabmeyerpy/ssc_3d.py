@@ -1215,9 +1215,11 @@ class CrabSSC3D(object):
               which='sync',
               r_steps=129,
               r_min=0.,
+              theta_max=None,
               theta_steps=20,
               theta_steps_interp=500,
               integration_mode='simps',
+              test=0,
               **kwargs):
         """
         Compute the 68% extension of the nebula
@@ -1257,6 +1259,10 @@ class CrabSSC3D(object):
         -------
         Two arrays with frequencies and array with 68% extension for each frequency
         """
+        
+        if theta_max:
+            theta_steps = np.linspace(0., theta_max, theta_steps)
+        
         # calculate the intensity along the line of sight
         I_nu, theta_arcmin, _ = self.intensity2(nu,
                                                 r_min=r_min,
@@ -1265,7 +1271,8 @@ class CrabSSC3D(object):
                                                 which=which,
                                                 integration_mode=integration_mode,
                                                 **kwargs)
-
+        if test==1:
+            return I_nu, theta_arcmin
         # interpolate the intensity
         # restrict yourself to some values of frequency
         # for numerical accuracy
@@ -1302,7 +1309,8 @@ class CrabSSC3D(object):
         cdf_interp = np.cumsum(f_interp, axis=1)
         cdf_interp = (cdf_interp.T - cdf_interp.min(axis=1)).T
         cdf_interp = (cdf_interp.T / cdf_interp.max(axis=1)).T
-
+        if test == 2:
+            return t_test, cdf_interp
         # compute 68% quantile from nearest index
         idx68 = np.argmin(np.abs(cdf_interp - 0.68), axis=1)
 
