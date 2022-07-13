@@ -3,6 +3,14 @@ from astropy import constants as c
 from collections import Iterable
 from scipy.integrate import simps
 
+def nel_spec_separate(gamma, r, **params):
+    """
+    Computes the total electron distribution as function of gamma and r. Uses
+    separate extension models for radio and wind electrons
+    """
+    result = nel_crab_radio(gamma, **params) * nel_radio_extension_gauss(r, **params)
+    result += nel_crab_wind(gamma, **params) * nel_crab_extension(r, gamma, **params)
+    return result
 
 def nel_crab(gamma, **params):
     """
@@ -165,14 +173,32 @@ def nel_crab_wind(gamma, **params):
     -----
     See Eq. 2 in https://arxiv.org/pdf/1008.4524.pdf
     """
+    params.setdefault('gwind_b2', 1/params['gmin'] ) # ensure backwards compatibility
+    params.setdefault('Sbreak2', 0 )
     result = np.zeros(gamma.shape)
-    m_wind = (gamma > params['gmin']) & (gamma <= 1. / params['gwind_b'])
-    m_wind_br = (gamma > 1. / params['gwind_b']) & (gamma < params['gwind_max'])
-    m_wind_tot = (gamma > params['gmin']) & (gamma < params['gwind_max'])
+    m_wind = (gamma > params['gmin']) & (gamma <= 1. / params['gwind_b']) # min - b
+    m_wind_br1 = (gamma > params['gmin']) & (gamma <= 1./ params['gwind_b2']) # min - b2
+    m_wind_br2 = (gamma > 1. / params['gwind_b']) & (gamma <= params['gmax']) # b - max
+    m_wind_tot = (gamma > params['gmin']) & (gamma <= params['gmax']) # min - max
+    
+    ### hard cutoff at gwind_max
+#     m_wind_br = (gamma > 1. / params['gwind_b']) & (gamma < params['gwind_max'])
+#     m_wind_tot = (gamma > params['gmin']) & (gamma < params['gwind_max'])
+#     result[m_wind] += np.power(gamma[m_wind] * params['gwind_b'], params['Swind'])
+#     result[m_wind_br] += np.power(gamma[m_wind_br] * params['gwind_b'], params['Swind'] + params['Sbreak'])
+#     result[m_wind_tot] *= params['Nwind']
+#     result[m_wind_tot] *= np.exp(-np.power(params['gwind_min'] / gamma[m_wind_tot], params['sup_wind']))
+    
+    ### exp cutoff after gwind_max
+    
     result[m_wind] += np.power(gamma[m_wind] * params['gwind_b'], params['Swind'])
-    result[m_wind_br] += np.power(gamma[m_wind_br] * params['gwind_b'], params['Swind'] + params['Sbreak'])
+    result[m_wind_br1] *= np.power(gamma[m_wind_br1] * params['gwind_b2'], params['Sbreak2'])
+    result[m_wind_br2] += np.power(gamma[m_wind_br2] * params['gwind_b'], params['Swind'] + params['Sbreak'])
     result[m_wind_tot] *= params['Nwind']
     result[m_wind_tot] *= np.exp(-np.power(params['gwind_min'] / gamma[m_wind_tot], params['sup_wind']))
+    result[m_wind_tot] *= np.exp(- np.power(gamma[m_wind_tot]/ params['gwind_max'],2))  
+    
+    
     return result
 
 
@@ -288,12 +314,16 @@ def electron_distribution_width_bpl_smooth(gamma, **params):
     Width of electron distribution as a function of gamma
     """
     params.setdefault("smooth", 2.)
-
+        
     rho = np.zeros(gamma.shape)
     # nebula size constant in energy for electron energies below 34 GeV
     rho = 1. + np.power(gamma / params['gradio_max'], params['smooth'])
     rho = np.power(rho, params['index'] / params['smooth'])
-    rho *= params['radio_size_cm']
+    # check for wind_size in case of separate extensions
+    if 'wind_size_cm' in params.keys():
+        rho *= params['wind_size_cm']
+    else:
+        rho *= params['radio_size_cm']
 
     if "norm_spatial" in params:
         rho *= params["norm_spatial"]
@@ -408,11 +438,27 @@ def nel_shock(gamma, **params):
     electron density at shock
     from Atoyan & Aharonian (1996)
     """
-    result = params['Nwind'] * np.power(params['gwind_min'] + gamma, params['Swind'])
+    params.setdefault("Sbreak", 0.0)
+    params.setdefault("gwind_b", 1e-05)
+    mask = gamma > 1/params['gwind_b']
+#     result = np.zeros(gamma.shape)
+    result = np.power(1+gamma/params['gwind_min'], params['Swind'])
+    result[mask] *= np.power(gamma[mask]*params['gwind_b'], params['Sbreak'])
     result *= np.exp(- gamma / params['gwind_max'])
-
+    result *=  np.exp(-np.power(params['gwind_min'] / gamma, 2.8))
+    result *= params['Nwind'] 
     return result
 
+# for KC model v04 and earlier
+# def nel_shock(gamma, **params):
+#     """
+#     electron density at shock
+#     from Atoyan & Aharonian (1996)
+#     """
+#     result = params['Nwind'] * np.power(params['gwind_min'] + gamma, params['Swind'])
+#     result *= np.exp(- gamma / params['gwind_max'])
+
+#     return result
 
 def nel_wind_kc(gamma, r, fill_value=1e-80, **params):
     """
