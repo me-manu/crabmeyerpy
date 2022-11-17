@@ -11,7 +11,6 @@ from numpy import log, exp, pi, sqrt, tan
 from .photonfields import *
 from .nb_utils import multi_5dim_piecewise, multi_5dim_simps, black_body_nb, multi_5dim_romb
 from .ssc import kpc2cm, eV2erg, eV2Hz, m_e_eV, arcmin2rad, ic_kernel
-from astropy import units as u
 from astropy import constants as c
 from astropy.cosmology import Planck15 as cosmo
 
@@ -398,8 +397,14 @@ class CrabSSC3D(object):
             raise ValueError("nu and theta have inconsistent shapes")
 
         # x = nu / nu_c as 2d grid,
-        # nu_c: critical frequency for B in G; Longair vol.2 p. 261
-        nu_c = 4.199e10 * self._B(rrr, **self._parameters) * u.G.to('T') * exp(ggg)**2.
+        # nu_c = 3 e B gamma^2 / 4 pi m c in cgs units, see B&G Eq. 4.32
+        # With e in Fr this has units Fr G s g^-1 cm^-1
+        # Using that Fr G s^2 cm^-1 g^-1 = 1 we can see that nu_c is in s^-1 = Hz
+        # This is encoded in pre_factor:
+        pre_factor = (c.e.esu * 3. / 4. / c.m_e.cgs / c.c.cgs / np.pi).value
+        # pre_factor is equal to 4.199e6 for B in G
+        # this is consistent with Longair vol.2 p. 261 who gets 4.199e10 with B in T
+        nu_c = pre_factor * self._B(rrr, **self._parameters) * exp(ggg)**2.
         x = nnn / nu_c
 
         # define a mask for integration
@@ -427,13 +432,18 @@ class CrabSSC3D(object):
         # When you use Fr G s^2 / (cm g) = 1 you get
         # units Fr^2 / cm and with Fr = cm^3/2 g^1/2 s^-1
         # this becomes g cm^2 s^2 = erg = erg / Hz / s.
-        # The pre factor is then consistent with 18.36 in Longair Vol.2
+        # The pre factor is then consistent with Eq. (18.36) in Longair Vol.2
         # since he calculates in W and for B in Tesla.
         result *= ((c.e.esu**3.) / (c.m_e.cgs * c.c.cgs**2.) * sqrt(3.)).value
         # this is equal to 2.344355730864404e-22
 
-        # average over all pitch angles gives 2/3
-        result *= self._B(rr, **self._parameters) * sqrt(2.0/3.0)
+        # multiply with magnetic field
+        # note that there's no factor sqrt(2/3) anymore,
+        # this is taken care in the new sync function, where the averaging
+        # over random B field enters correctly.
+        # New sync function is in __init__ function
+        result *= self._B(rr, **self._parameters)
+
 
         # Together with electron spectrum, this has now units
         # erg / Hz / s / cm^3, i.e. is the Volume emissivity
@@ -866,14 +876,13 @@ class CrabSSC3D(object):
         # multiply the two in integrate over initial photon energy
         kernel_in = phot_dens * f
 
+        self._logger.debug(f"kernel shape for integration over photon dens energy: {kernel_in.shape}")
         # kernel needs to be divided by exp(log_eee) but
         # cancels since we're integrating over log(energy).
-        # now in photons / cm^3 / eV / cm^3
-        self._logger.debug(f"kernel shape for integration over photon dens energy: {kernel_in.shape}")
-
         # only doing this with simps integration since
         # log_eee spacing is not constant
         kernel_out = simps(kernel_in, log_eee, axis=2)
+        # now in photons / cm^3 / eV / cm^3  (since n_phot / epsilon in cm^-3 eV^-2)
         kernel_out *= self._n_el(exp(gg), rr, **self._parameters) / exp(gg) ** 2.
 
         # integrate over electron gamma factor
