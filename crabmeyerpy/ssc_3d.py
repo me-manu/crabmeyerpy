@@ -716,9 +716,9 @@ class CrabSSC3D(object):
             self._logger.debug(kernel.shape)
             self._logger.debug(f"Integrating using {self._integration_mode}")
             if self._integration_mode == 'romb' or not len(yy.shape) == 5:
-                phot_dens = romb(kernel * yy, dx=np.diff(log(y))[0], axis=-1)
+                phot_dens = romb(kernel, dx=np.diff(y)[0], axis=-1)
             else:
-                phot_dens = self._integrate_5d(kernel * yy, log(yy))
+                phot_dens = self._integrate_5d(kernel, yy)
             phot_dens *= 0.5 * r_max / c.c.cgs.value
             t3 = time.time()
 
@@ -757,9 +757,9 @@ class CrabSSC3D(object):
 
             #phot_dens_dust = simps(kernel_dust * yy, log(yy), axis=-1) * r_max * 0.5 / c.c.cgs.value
             if self._integration_mode == 'romb' or not len(yy.shape) == 5:
-                phot_dens_dust = romb(kernel_dust * yy, dx=np.diff(log(y))[0], axis=-1)
+                phot_dens_dust = romb(kernel_dust, dx=np.diff(y)[0], axis=-1)
             else:
-                phot_dens_dust = self._integrate_5d(kernel_dust * yy, log(yy))
+                phot_dens_dust = self._integrate_5d(kernel_dust, yy)
             phot_dens_dust *= r_max * 0.5 / c.c.cgs.value
 
             phot_dens += phot_dens_dust
@@ -777,7 +777,8 @@ class CrabSSC3D(object):
         """
 
         # radius for integration of photon emissivity
-        r1 = np.logspace(np.log10(r_min), np.log10(r_max), r1_steps)
+#         r1 = np.logspace(np.log10(r_min), np.log10(r_max), r1_steps)
+        r1 = np.linspace(r_min, r_max, r1_steps) # linear r grid works much better
         # stack the eps array along new r1 axis
 
         ee = np.tile(eps[..., np.newaxis], list(r1.shape))
