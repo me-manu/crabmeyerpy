@@ -264,7 +264,11 @@ class CrabSSC3D(object):
 
     @property
     def r0(self):
-        return self._r0
+        if 'wind_size_cm' in self.parameters:
+            # 3sigma of a 2D Gaussian contains ~0.997^2 = 99.4% of the flux
+            # could also do 4 sigma but the error of the larger interp grid should be similar
+            return self.parameters['wind_size_cm']*3
+        else: return self._r0
 
     @property
     def j_sync_interp(self):
@@ -294,9 +298,9 @@ class CrabSSC3D(object):
     def d(self, d):
         self._d = d
 
-    @r0.setter
-    def r0(self, r0):
-        self._r0 = r0
+#     @r0.setter
+#     def r0(self, r0):
+#         self._r0 = r0
 
     @integration_mode.setter
     def integration_mode(self, integration_mode):
@@ -373,7 +377,7 @@ class CrabSSC3D(object):
         if gmin is None:
             gmin = self._parameters['gradio_min']
         if gmax is None:
-            gmax = self._parameters['gwind_max']
+            gmax = self._parameters['gwind_max']*3
 
         # 3d grid for Freq, gamma factors, and r values
         log_g = linspace(log(gmin), log(gmax), g_steps)
@@ -411,7 +415,7 @@ class CrabSSC3D(object):
         m = (log(x) > self.__start) & (log(x) < self.__end)
 
         # and for the maximum extension
-        m &= rrr <= self._r0
+        m &= rrr <= self.r0
         result = np.full(x.shape, 1e-80)
 
         # synchrotron function
@@ -651,8 +655,8 @@ class CrabSSC3D(object):
         """
 
         t0 = time.time()
-        r_max = np.max([r.max(), 1. * self._r0])
-        r_min = np.min([r.min(), 1e-5])
+        r_max = np.max([r.max(), 1. * self.r0]) # TU: hier nicht np.min?
+        r_min = np.min([r.min(), 1e-5])          # TU: hier nicht np.max?
 
         ee, xx, y, yy = self._get_integration_arrays(eps, r, r1_steps, r_max, r_min)
 
@@ -814,23 +818,20 @@ class CrabSSC3D(object):
         gamma = exp(log_g)
 
         # generate the arrays for observed freq nu, gamma factor, radius, and energy of photon field
-        nnn, ggg, _, rrr = meshgrid(nu, log_g, np.arange(e_steps), r, indexing='ij')
-        _, gg, rr = meshgrid(nu, log_g, r, indexing='ij')
-        nn, _ = meshgrid(nu, r, indexing='ij')
-
-        log_eee = zeros(nnn.shape)
-
-        m = zeros(nnn.shape, dtype=np.bool)
-        for i, n in enumerate(nu):
-            for j, lg in enumerate(log_g):
-                x1 = max(log(n / eV2Hz / 4. / gamma[j] ** 2.), log(1e-18))
-                x2 = log(n / eV2Hz)
-                # now log_eps has shape g_steps x e_steps
-                log_eee[i, j], _ = np.meshgrid(linspace(x1, x2, e_steps), r, indexing='ij')
-                if x2 > x1:
-                    m[i, j] = True
-
-        t1 = time.time()
+        nnn, ggg, _ = meshgrid(nu, log_g, np.arange(e_steps), indexing='ij')
+        nnn=nnn[...,None] # ic kernel
+        ggg=ggg[...,None] # ic kernel
+        rrr=np.tile(r,(nu.size,g_steps,e_steps,1)) # phot dens
+        _, gg, rr = meshgrid(nu, log_g, r, indexing='ij') # n_el
+        
+        x1=log(nu[None,:] / eV2Hz / 4. / gamma[:,None] ** 2.)
+        x1 = np.maximum(x1,log(1e-18))
+        x2 = log(nu[None,:] / eV2Hz)
+        log_eee1=linspace(x1, x2, e_steps).T[...,None] # for ic_kernel
+        log_eee=np.tile(log_eee1, (1,1,1,r.size))  # for photon dens
+        m = x2 > x1
+        
+        t1 = time.time()  # lower dimensions and no for loop (3s-->1s)
 
         # calculate photon densities:
         # these are in photons / eV / cm^3
@@ -866,12 +867,12 @@ class CrabSSC3D(object):
             phot_dens += black_body(exp(log_eee), cosmo.Tcmb0.value)
 
         t2 = time.time()
-        phot_dens[~m] = 1e-40
+        phot_dens[~m.T] = 1e-40
         m_isnan = np.isnan(phot_dens)
         phot_dens[m_isnan] = 1e-40
 
         # IC scattering kernel
-        f = ic_kernel(nnn, exp(ggg), exp(log_eee))
+        f = ic_kernel(nnn, exp(ggg), exp(log_eee1))
 
         # multiply the two in integrate over initial photon energy
         kernel_in = phot_dens * f
@@ -883,7 +884,7 @@ class CrabSSC3D(object):
         # log_eee spacing is not constant
         kernel_out = simps(kernel_in, log_eee, axis=2)
         # now in photons / cm^3 / eV / cm^3  (since n_phot / epsilon in cm^-3 eV^-2)
-        kernel_out *= self._n_el(exp(gg), rr, **self._parameters) / exp(gg) ** 2.
+        kernel_out = kernel_out*self._n_el(exp(gg), rr, **self._parameters) / exp(gg) ** 2.
 
         # integrate over electron gamma factor
         self._logger.debug(f"kernel shape for integration over gamma factor: {kernel_out.shape}")
@@ -895,7 +896,7 @@ class CrabSSC3D(object):
         # result of integration is in units of photons/cm^3/eV/cm^3
         # multiplying with Thomson*c*energy converting units gives to
         # units of erg/sec/eV/cm^3
-        result *= 3. / 4. * (c.sigma_T.cgs * c.c.cgs).value * nn / eV2Hz * eV2erg
+        result *= 3. / 4. * (c.sigma_T.cgs * c.c.cgs).value * nu[:,None] / eV2Hz * eV2erg
         # convert to erg / sec / Hz / cm^3
         # this is the spectral luminosity L_nu
         result /= eV2Hz
@@ -917,7 +918,7 @@ class CrabSSC3D(object):
         Calculate the maximum angular extension of the nebula
         in arcmin
         """
-        theta_max = np.arctan(self._r0 / self._d) / arcmin2rad
+        theta_max = np.arctan(self.r0 / self._d) / arcmin2rad
         return theta_max
 
     def intensity(self, nu, theta,
@@ -964,9 +965,9 @@ class CrabSSC3D(object):
             theta_arcmin = theta
 
         if log:
-            r = np.logspace(np.log10(r_min), np.log10(self._r0), r_steps)
+            r = np.logspace(np.log10(r_min), np.log10(self.r0), r_steps)
         else:
-            r = np.linspace(r_min, self._r0, r_steps)
+            r = np.linspace(r_min, self.r0, r_steps)
 
         tt, rr = np.meshgrid(theta_arcmin, r, indexing='ij')
         _, tntn = np.meshgrid(nu, theta_arcmin, indexing='ij')
@@ -1066,13 +1067,13 @@ class CrabSSC3D(object):
 
         # build the integration array
         rr = np.zeros((theta_arcmin.size, r_steps))
-        r = np.linspace(r_min, self._r0, r_steps)
+        r = np.linspace(r_min, self.r0, r_steps)
 
         for i, t in enumerate(theta_arcmin):
 
             # lower integration bound
             r_int_min = np.min([r_min, self._d * np.sin(t * arcmin2rad)])
-            rr[i] = np.linspace(r_min, self._r0, r_steps)
+            rr[i] = np.linspace(r_min, self.r0, r_steps)
 
         # build 3D arrays over nu, r
         tt, _ = np.meshgrid(theta_arcmin, r, indexing='ij')

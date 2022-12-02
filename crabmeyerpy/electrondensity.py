@@ -6,7 +6,18 @@ from scipy.integrate import simps
 def nel_spec_separate(gamma, r, **params):
     """
     Computes the total electron distribution as function of gamma and r. Uses
-    separate extension models for radio and wind electrons
+    separate extension models for radio and wind electrons.
+    
+    r: array-like
+        distance from nebula center in cm
+    gamma: array-like
+        gamma factors
+    params: dict
+        function parameters
+
+    Returns
+    -------
+    Total electron spectrum as array
     """
     result = nel_crab_radio(gamma, **params) * nel_radio_extension_gauss(r, **params)
     result += nel_crab_wind(gamma, **params) * nel_crab_extension(r, gamma, **params)
@@ -173,6 +184,7 @@ def nel_crab_wind(gamma, **params):
     -----
     See Eq. 2 in https://arxiv.org/pdf/1008.4524.pdf
     """
+    ### <--(>) (un)comment for Dieter's model (strict cutoff)
     params.setdefault('gwind_b2', 1/params['gmin'] ) # ensure backwards compatibility
     params.setdefault('Sbreak2', 0 )
     result = np.zeros(gamma.shape)
@@ -183,7 +195,7 @@ def nel_crab_wind(gamma, **params):
     
     ### hard cutoff at gwind_max
 #     m_wind_br = (gamma > 1. / params['gwind_b']) & (gamma < params['gwind_max'])
-#     m_wind_tot = (gamma > params['gmin']) & (gamma < params['gwind_max'])
+#     m_wind_tot = (gamma > params['gwind_min']) & (gamma < params['gwind_max'])  # <--
 #     result[m_wind] += np.power(gamma[m_wind] * params['gwind_b'], params['Swind'])
 #     result[m_wind_br] += np.power(gamma[m_wind_br] * params['gwind_b'], params['Swind'] + params['Sbreak'])
 #     result[m_wind_tot] *= params['Nwind']
@@ -195,8 +207,9 @@ def nel_crab_wind(gamma, **params):
     result[m_wind_br1] *= np.power(gamma[m_wind_br1] * params['gwind_b2'], params['Sbreak2'])
     result[m_wind_br2] += np.power(gamma[m_wind_br2] * params['gwind_b'], params['Swind'] + params['Sbreak'])
     result[m_wind_tot] *= params['Nwind']
-    result[m_wind_tot] *= np.exp(-np.power(params['gwind_min'] / gamma[m_wind_tot], params['sup_wind']))
-    result[m_wind_tot] *= np.exp(- np.power(gamma[m_wind_tot]/ params['gwind_max'],2))  
+    result[m_wind_tot] *= np.exp(-np.power(params['gwind_min'] / gamma[m_wind_tot], params['sup_wind'])) # -->
+    result[m_wind_tot] *= np.exp(- np.power(gamma[m_wind_tot]/ params['gwind_max'],2))  # -->
+    
     
     
     return result
@@ -257,6 +270,33 @@ def electron_distribution_width(gamma, **params):
         rho *= params["norm_spatial"]
 
     return rho
+
+def electron_distribution_width_simple_PL(gamma, **params):
+    """
+    Calculate the energy-dependent width of the electron distribution
+
+
+    Parameters
+    ----------
+    gamma: array-like
+        gamma values
+
+    params: dict
+        dict with parameters
+
+    Returns
+    -------
+    Width of electron distribution as a function of gamma
+    """
+
+#     return params['wind_size_cm'] * (gamma/params['gradio_max'])**params['index']
+#     return params['wind_size_cm'] * gamma**params['index']
+
+    # Dieter's implementation eq. (5)
+    # 
+    prefactor = params['wind_size_cm']#/3600 *np.pi/180 *6.171355162982735e+21 # * d_crab/2kpc (= 1)
+    base = np.power(gamma/9e5,2)   # * B_0/264 (=1)
+    return prefactor * np.power(base, -params['index'])
 
 
 def electron_distribution_width_bpl(gamma, **params):
@@ -347,11 +387,13 @@ def nel_crab_extension(r, gamma, **params):
     -------
     spatial distribution
     """
+    ### <--(>) (un)comment for Dieter's model (simple PL extension)
     #rho = electron_distribution_width(gamma, **params)
     #rho = electron_distribution_width_bpl(gamma, **params)
-    rho = electron_distribution_width_bpl_smooth(gamma, **params)
+    rho = electron_distribution_width_bpl_smooth(gamma, **params) # -->
+#     rho = electron_distribution_width_simple_PL(gamma, **params)  # <--
 
-    result = np.exp(-r ** 2. / rho ** 2. / 2.)
+    result = np.exp(-r ** 2. / rho ** 2. / 2.) / rho**3
     
     if "norm_spatial" in params:
         result /= params["norm_spatial"]**2  # keeps flux relatively constant when changing norm_spatial
