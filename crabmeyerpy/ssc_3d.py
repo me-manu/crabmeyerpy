@@ -1067,14 +1067,12 @@ class CrabSSC3D(object):
             theta_arcmin = theta
 
         # build the integration array
-        rr = np.zeros((theta_arcmin.size, r_steps))
         r = np.linspace(r_min, self.r0, r_steps)
-
-        for i, t in enumerate(theta_arcmin):
-
-            # lower integration bound
-            r_int_min = np.min([r_min, self._d * np.sin(t * arcmin2rad)])
-            rr[i] = np.linspace(r_min, self.r0, r_steps)
+        r_int_inshock = np.sqrt(r_min**2 - (self._d*np.sin(theta_arcmin*arcmin2rad))**2) # approx. for small theta
+        r_int_out = self._d*np.sin(theta_arcmin*arcmin2rad)**2
+        r_int_min = np.where(np.isnan(r_int_inshock), r_int_out, r_int_inshock)
+        r_int_max = np.sqrt(self.r0**2 - (self._d*np.sin(theta_arcmin*arcmin2rad))**2)
+        rr=np.linspace(r_int_min,r_int_max,r_steps).T
 
         # build 3D arrays over nu, r
         tt, _ = np.meshgrid(theta_arcmin, r, indexing='ij')
