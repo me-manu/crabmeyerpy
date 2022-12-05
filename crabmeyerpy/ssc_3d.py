@@ -1119,7 +1119,7 @@ class CrabSSC3D(object):
         # the result is now in ergs / s / cm^2 / sr /Hz
         # the extra cos factor comes from the substitution from s to r
         if integration_mode == 'romb':
-            I_nu = 2. * romb(j, dx=np.diff(r)[0], axis=-1) / np.cos(tntn * arcmin2rad)
+            I_nu = 2. * romb(j, dx=np.diff(rr,axis=1)[:,0], axis=-1) / np.cos(tntn * arcmin2rad)
         else:
             I_nu = 2. * simps(j, rrr, axis=-1) / np.cos(tntn * arcmin2rad)
         return I_nu, theta_arcmin, j
