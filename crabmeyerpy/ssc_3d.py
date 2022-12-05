@@ -18,7 +18,7 @@ from fast_interp.fast_interp import interp2d as fast_interp2d
 
 import time
 import logging
-
+import warnings
 
 def kernel_r(y, x):
     """
@@ -1062,37 +1062,25 @@ class CrabSSC3D(object):
         the theta array, and the volume emissivity array
         """
         if isinstance(theta, int):
-            theta_arcmin = np.linspace(0., self.theta_max_arcmin() * 0.99, theta)
+            theta_arcmin = np.linspace(0., self.theta_max_arcmin() * 0.999, theta)
         else:
+            if np.max(theta) > self.theta_max_arcmin():
+                raise ValueError(f"Can't go further than {self.theta_max_arcmin():.2f}arcmin. theta max was requested at {np.max(theta):.2f}arcmin.")
             theta_arcmin = theta
 
         # build the integration array
         r = np.linspace(r_min, self.r0, r_steps)
-        r_int_inshock = np.sqrt(r_min**2 - (self._d*np.sin(theta_arcmin*arcmin2rad))**2) # approx. for small theta
-        r_int_out = self._d*np.sin(theta_arcmin*arcmin2rad)**2
-        r_int_min = np.where(np.isnan(r_int_inshock), r_int_out, r_int_inshock)
-        r_int_max = np.sqrt(self.r0**2 - (self._d*np.sin(theta_arcmin*arcmin2rad))**2)
-        rr=np.linspace(r_int_min,r_int_max,r_steps).T
-
-        # build 3D arrays over nu, r
-        tt, _ = np.meshgrid(theta_arcmin, r, indexing='ij')
-
-        # build 3D arrays over nu, theta, r
-        nnn = np.tile(nu[:, np.newaxis, np.newaxis], list(rr.shape))
-        rrr = np.rollaxis(np.tile(rr[..., np.newaxis], list(nu.shape)), -1)
-        ttt = np.rollaxis(np.tile(tt[..., np.newaxis], list(nu.shape)), -1)
-
-        _, tntn = np.meshgrid(nu, theta_arcmin, indexing='ij')
-
-        # build the array over the line of sight
-        # within the nebula
-        sss = (self._d - rrr) / np.cos(ttt * arcmin2rad)
-
-        # the interpolation of the emissivity
-        # is over nu and r
-        # thus, for each point along the line of sight
-        # you need to calculate the corresponding distance to the nebula center
-        xxx = np.sqrt(sss ** 2. + self._d ** 2. - 2. * self._d * sss * np.cos(ttt * arcmin2rad))
+        ## s are linearly spaced values along the LoS
+        ## x are the radii from s to the centre
+        x_min_sq = (np.sin(theta_arcmin*arcmin2rad)*self._d)**2
+        with np.errstate(invalid='ignore'):
+            s_int_min = np.nan_to_num(np.sqrt(r_min**2 - x_min_sq))
+            s_int_max = np.nan_to_num(np.sqrt(self.r0**2 - x_min_sq))
+        ss = np.linspace(s_int_min, s_int_max, r_steps).T  # r_steps because s^=r
+        xx = np.sqrt(x_min_sq[:,np.newaxis] + ss**2)
+                                      
+        nnn = np.tile(nu[:, np.newaxis, np.newaxis], list(xx.shape))
+        xxx = np.rollaxis(np.tile(xx[..., np.newaxis], list(nu.shape)), -1)
 
         # get the volume emissivity
         if which == 'sync':
@@ -1119,13 +1107,14 @@ class CrabSSC3D(object):
         # the result is now in ergs / s / cm^2 / sr /Hz
         # the extra cos factor comes from the substitution from s to r
         if integration_mode == 'romb':
-            I_nu = 2. * romb(j, dx=np.diff(rr,axis=1)[:,0], axis=-1) / np.cos(tntn * arcmin2rad)
+            I_nu = 2. * romb(j, dx=np.diff(ss,axis=1)[:,0], axis=-1) 
         else:
-            I_nu = 2. * simps(j, rrr, axis=-1) / np.cos(tntn * arcmin2rad)
+            sss = np.tile(ss[np.newaxis,...], list(nu.shape)+[1,1])
+            I_nu = 2. * simps(j, sss, axis=-1) 
         return I_nu, theta_arcmin, j
 
     def flux(self,
-             nu, theta_edges,
+             nu, theta_edges=None,
              which='sync',
              r_steps=129,
              r_min=0.,
@@ -1172,15 +1161,24 @@ class CrabSSC3D(object):
         -------
         2D array with flux as function of frequency nu within the theta integration edges
         """
-
+        
+        if theta_edges is None:
+            theta_edges = [0, self.theta_max_arcmin() * 0.999]
         # first, build a theta array for integration over edges
         theta_array = []
         dtheta_array = []
 
         kernel = []
         for i, t in enumerate(theta_edges[:-1]):
+            t_max = self.theta_max_arcmin()
+            t_upper = theta_edges[i+1]
+            if t > t_max: 
+                continue
+            elif t_upper > t_max:
+                warnings.warn(f"Setting theta_max to {t_max:.2f}arcmin.")
+                t_upper = t_max
             x = np.linspace(t,
-                            theta_edges[i+1],
+                            t_upper,
                             theta_steps)
 
             I_nu, _, _ = self.intensity2(nu, x,
