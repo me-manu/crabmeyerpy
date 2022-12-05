@@ -1105,7 +1105,6 @@ class CrabSSC3D(object):
         # integrate
         # Since j_nu is in ergs / s / cm^3 / sr / Hz
         # the result is now in ergs / s / cm^2 / sr /Hz
-        # the extra cos factor comes from the substitution from s to r
         if integration_mode == 'romb':
             I_nu = 2. * romb(j, dx=np.diff(ss,axis=1)[:,0], axis=-1) 
         else:
@@ -1296,8 +1295,8 @@ class CrabSSC3D(object):
         # perform interpolation
         I_nu_interp = RectBivariateSpline(np.log10(nu[m]), theta_arcmin,
                                           np.log10(I_nu[m, :]),
-                                          kx=2,
-                                          ky=2)
+                                          kx=1,
+                                          ky=1)
 
         # compute a fine grid
         t_test = np.linspace(theta_arcmin[0], theta_arcmin[-1], theta_steps_interp)
@@ -1317,7 +1316,7 @@ class CrabSSC3D(object):
         cdf_interp = (cdf_interp.T - cdf_interp.min(axis=1)).T
         cdf_interp = (cdf_interp.T / cdf_interp.max(axis=1)).T
         if test == 2:
-            return t_test, cdf_interp
+            return t_test, I_interp
         # compute 68% quantile from nearest index
         idx68 = np.argmin(np.abs(cdf_interp - 0.68), axis=1)
 
