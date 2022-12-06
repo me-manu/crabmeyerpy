@@ -399,7 +399,6 @@ class CrabSSC3D(object):
             rr = r
         else:
             raise ValueError("nu and theta have inconsistent shapes")
-
         # x = nu / nu_c as 2d grid,
         # nu_c = 3 e B gamma^2 / 4 pi m c in cgs units, see B&G Eq. 4.32
         # With e in Fr this has units Fr G s g^-1 cm^-1
@@ -493,8 +492,7 @@ class CrabSSC3D(object):
                                                      nu_steps, retstep=True)
         r_intp, r_intp_steps = np.linspace(r_min, r_max, r_steps, retstep=True)
 
-        log_nn, rr = np.meshgrid(log_nu_intp, r_intp, indexing='ij')
-        j_sync = self.j_sync(np.exp(log_nn), rr,
+        j_sync = self.j_sync(np.exp(log_nu_intp), r_intp,
                              gmin=gmin,
                              gmax=gmax,
                              g_steps=g_steps,
@@ -655,8 +653,8 @@ class CrabSSC3D(object):
         """
 
         t0 = time.time()
-        r_max = np.max([r.max(), 1. * self.r0]) # TU: hier nicht np.min?
-        r_min = np.min([r.min(), 1e-5])          # TU: hier nicht np.max?
+        r_max = r.max()*0.99 # move 1% out and in of the edges so the r and r1 array
+        r_min = r.min()*1.01 # do not have the same value (divergence in the kernel)
 
         ee, xx, y, yy = self._get_integration_arrays(eps, r, r1_steps, r_max, r_min)
 
@@ -789,7 +787,7 @@ class CrabSSC3D(object):
         y = r1 / r_max
         return ee, xx, y, yy
 
-    def j_ic(self, nu, r, g_steps=129, e_steps=129, r1_steps=33, integration_mode='simps'):
+    def j_ic(self, nu, r, g_steps=129, e_steps=129, r1_steps=33, integration_mode='simps', test=0):
         """
 
         Spectral luminosity F_nu in erg/s/Hz/cm^2 for inverse Compton scattering.
@@ -911,7 +909,9 @@ class CrabSSC3D(object):
         result[result <= 0] = 1e-100
         #self._j_ic_interp = RectBivariateSpline(log(nu), log(r), log(result), kx=3, ky=3, s=0)
         self._j_ic_interp = RectBivariateSpline(log(nu), r, log(result), kx=1, ky=1, s=0)
-
+        if test==1:
+            return log_eee, rrr, nnn, ggg, phot_dens ,f, m, m_isnan
+        
         return result
 
     def theta_max_arcmin(self):
