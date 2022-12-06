@@ -375,9 +375,9 @@ class CrabSSC3D(object):
         array with spectral luminosity F_nu  density at frequency nu
         """
         if gmin is None:
-            gmin = self._parameters['gradio_min']
+            gmin = self._parameters['gmin']
         if gmax is None:
-            gmax = self._parameters['gwind_max']*3
+            gmax = self._parameters['gmax']
 
         # 3d grid for Freq, gamma factors, and r values
         log_g = linspace(log(gmin), log(gmax), g_steps)
