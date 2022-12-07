@@ -91,14 +91,14 @@ class CrabSSC3D(object):
                  n_el,
                  B,
                  j_dust,
-                 d_kpc=2., r0_pc=1.8,
-                 nu_sync_min=1e7, nu_sync_max=1e30,
+                 d_kpc=2., r0_pc=3.6,
+                 nu_sync_min=5e8, nu_sync_max=5e23,
                  integration_mode="scipy_simps",
                  log_level="INFO",
                  ic_sync=True,
                  ic_dust=True,
                  ic_cmb=True,
-                 dust_radial_dependence='gauss',
+                 dust_radial_dependence='shell',
                  use_fast_interp=False):
         """
         Initialize the class
@@ -267,7 +267,7 @@ class CrabSSC3D(object):
         if 'wind_size_cm' in self.parameters:
             # 3sigma of a 2D Gaussian contains ~0.997^2 = 99.4% of the flux
             # could also do 4 sigma but the error of the larger interp grid should be similar
-            return self.parameters['wind_size_cm']*3
+            return max(self.parameters['wind_size_cm'],self.parameters['radio_size_cm'])*3
         else: return self._r0
 
     @property
@@ -842,6 +842,8 @@ class CrabSSC3D(object):
             logging.debug("Interpolating photon density")
 
             phot_dens_grid = self.phot_dens(exp(log_ee_grid), rr_phot_dens, r1_steps=r1_steps)
+            if test==2:
+                return phot_dens_grid, exp(log_ee_grid), rr_phot_dens
 
             if self._use_fast_interp:
                 log_phot_dens_interp = fast_interp2d([log_EeV_grid[0], r_phot_dens[0]],
