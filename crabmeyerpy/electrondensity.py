@@ -158,7 +158,7 @@ def nel_radio_extension_gauss(r, **params):
     Gaussian extension for radio electrons
     with width radio_size_cm
     """
-    result = np.exp(-r**2. / 2. / params['radio_size_cm']**2)
+    result = np.exp(-r**2. / 2. / params['radio_size_cm']**2)/ params['radio_size_cm']**3
     return result
 
 
@@ -184,35 +184,21 @@ def nel_crab_wind(gamma, **params):
     -----
     See Eq. 2 in https://arxiv.org/pdf/1008.4524.pdf
     """
-    ### <--(>) (un)comment for Dieter's model (strict cutoff)
-    params.setdefault('gwind_b2', 1/params['gmin'] ) # ensure backwards compatibility
-    params.setdefault('Sbreak2', 0 )
+    
     result = np.zeros(gamma.shape)
-    m_wind = (gamma > params['gmin']) & (gamma <= 1. / params['gwind_b']) # min - b
-    m_wind_br1 = (gamma > params['gmin']) & (gamma <= 1./ params['gwind_b2']) # min - b2
-    m_wind_br2 = (gamma > 1. / params['gwind_b']) & (gamma <= params['gmax']) # b - max
-    m_wind_tot = (gamma > params['gmin']) & (gamma <= params['gmax']) # min - max
+    m_wind = (gamma > params['gwind_min']) & (gamma <= params['gwind_max']) # min - max
+    m_wind_br1 = (gamma > params['gwind_min']) & (gamma <= params['gwind_1']) # min - b1
+    m_wind_br2 = (gamma > params['gwind_1']) & (gamma <= params['gwind_2']) # b1 - b2
+    m_wind_br3 = (gamma > params['gwind_2']) & (gamma <= params['gwind_max']) # b2 - max
     
-    ### hard cutoff at gwind_max
-#     m_wind_br = (gamma > 1. / params['gwind_b']) & (gamma < params['gwind_max'])
-#     m_wind_tot = (gamma > params['gwind_min']) & (gamma < params['gwind_max'])  # <--
-#     result[m_wind] += np.power(gamma[m_wind] * params['gwind_b'], params['Swind'])
-#     result[m_wind_br] += np.power(gamma[m_wind_br] * params['gwind_b'], params['Swind'] + params['Sbreak'])
-#     result[m_wind_tot] *= params['Nwind']
-#     result[m_wind_tot] *= np.exp(-np.power(params['gwind_min'] / gamma[m_wind_tot], params['sup_wind']))
-    
-    ### exp cutoff after gwind_max
-    
-    result[m_wind] += np.power(gamma[m_wind] * params['gwind_b'], params['Swind'])
-    result[m_wind_br1] *= np.power(gamma[m_wind_br1] * params['gwind_b2'], params['Sbreak2'])
-    result[m_wind_br2] += np.power(gamma[m_wind_br2] * params['gwind_b'], params['Swind'] + params['Sbreak'])
-    result[m_wind_tot] *= params['Nwind']
-    result[m_wind_tot] *= np.exp(-np.power(params['gwind_min'] / gamma[m_wind_tot], params['sup_wind'])) # -->
-    result[m_wind_tot] *= np.exp(- np.power(gamma[m_wind_tot]/ params['gwind_max'],2))  # -->
-    
-    
-    
+    result[m_wind_br1] += np.power(gamma[m_wind_br1] / params['gwind_1'], params['S1']) \
+                        * np.power(params['gwind_1'] / params['gwind_2'], params['S2'])
+    result[m_wind_br2] += np.power(gamma[m_wind_br2] / params['gwind_2'], params['S2'])
+    result[m_wind_br3] += np.power(gamma[m_wind_br3] / params['gwind_2'], params['S3'])
+    result[m_wind] *= params['Nwind']
+       
     return result
+
 
 
 def electron_distribution_width_old(gamma, **params):
@@ -360,14 +346,7 @@ def electron_distribution_width_bpl_smooth(gamma, **params):
     rho = 1. + np.power(gamma / params['gradio_max'], params['smooth'])
     rho = np.power(rho, params['index'] / params['smooth'])
     # check for wind_size in case of separate extensions
-    if 'wind_size_cm' in params.keys():
-        rho *= params['wind_size_cm']
-    else:
-        rho *= params['radio_size_cm']
-
-    if "norm_spatial" in params:
-        rho *= params["norm_spatial"]
-
+    rho *= params['wind_size_cm']
     return rho
 
 
@@ -394,10 +373,7 @@ def nel_crab_extension(r, gamma, **params):
 #     rho = electron_distribution_width_simple_PL(gamma, **params)  # <--
 
     result = np.exp(-r ** 2. / rho ** 2. / 2.) / rho**3
-    
-    if "norm_spatial" in params:
-        result /= params["norm_spatial"]**2  # keeps flux relatively constant when changing norm_spatial
-        
+            
     return result
 
 
