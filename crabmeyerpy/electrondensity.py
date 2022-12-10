@@ -344,7 +344,7 @@ def electron_distribution_width_bpl_smooth(gamma, **params):
     rho = np.zeros(gamma.shape)
     # nebula size constant in energy for electron energies below 34 GeV
     rho = 1. + np.power(gamma / params['gradio_max'], params['smooth'])
-    rho = np.power(rho, params['index'] / params['smooth'])
+    rho = np.power(rho, -params['index'] / params['smooth'])
     # check for wind_size in case of separate extensions
     rho *= params['wind_size_cm']
     return rho
