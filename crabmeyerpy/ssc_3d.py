@@ -1089,7 +1089,7 @@ class CrabSSC3D(object):
             if self._j_sync_interp is None:
                 self.interp_sync_init(r_min=r.min(), r_max=r.max(), **kwargs)
 
-            xxx[xxx == 0.] = 1e-10
+#             xxx[xxx == 0.] = 1e-10
             j = np.exp(self._j_sync_interp(np.log(nnn), xxx))
 
         elif which == 'dust':
@@ -1285,7 +1285,7 @@ class CrabSSC3D(object):
         # restrict yourself to some values of frequency
         # for numerical accuracy
         if which == 'sync':
-            m = nu < 1e24
+            m = nu < 5e23
         elif which == 'ic':
             m = nu < 3e29
         else:
