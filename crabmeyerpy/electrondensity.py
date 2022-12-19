@@ -186,16 +186,18 @@ def nel_crab_wind(gamma, **params):
     """
     
     result = np.zeros(gamma.shape)
-    m_wind = (gamma > params['gwind_min']) & (gamma <= params['gwind_max']) # min - max
-    m_wind_br1 = (gamma > params['gwind_min']) & (gamma <= params['gwind_1']) # min - b1
+    m_wind_tot = (gamma > params['gwind_min']/3) & (gamma <= params['gwind_max']*3) # min - max
+    m_wind_br1 = (gamma > params['gwind_min']/3) & (gamma <= params['gwind_1']) # min - b1
     m_wind_br2 = (gamma > params['gwind_1']) & (gamma <= params['gwind_2']) # b1 - b2
-    m_wind_br3 = (gamma > params['gwind_2']) & (gamma <= params['gwind_max']) # b2 - max
+    m_wind_br3 = (gamma > params['gwind_2']) & (gamma <= params['gwind_max']*3) # b2 - max
     
     result[m_wind_br1] += np.power(gamma[m_wind_br1] / params['gwind_1'], params['S1']) \
                         * np.power(params['gwind_1'] / params['gwind_2'], params['S2'])
     result[m_wind_br2] += np.power(gamma[m_wind_br2] / params['gwind_2'], params['S2'])
     result[m_wind_br3] += np.power(gamma[m_wind_br3] / params['gwind_2'], params['S3'])
-    result[m_wind] *= params['Nwind']
+    result[m_wind_tot] *= np.exp(-np.power(params['gwind_min'] / gamma[m_wind_tot], params['sup_wind']))
+    result[m_wind_tot] *= np.exp(- np.power(gamma[m_wind_tot]/ params['gwind_max'],2))  
+    result[m_wind_tot] *= params['Nwind']
        
     return result
 
@@ -369,8 +371,8 @@ def nel_crab_extension(r, gamma, **params):
     ### <--(>) (un)comment for Dieter's model (simple PL extension)
     #rho = electron_distribution_width(gamma, **params)
     #rho = electron_distribution_width_bpl(gamma, **params)
-    rho = electron_distribution_width_bpl_smooth(gamma, **params) # -->
-#     rho = electron_distribution_width_simple_PL(gamma, **params)  # <--
+#     rho = electron_distribution_width_bpl_smooth(gamma, **params) # -->
+    rho = electron_distribution_width_simple_PL(gamma, **params)  # <--
 
     result = np.exp(-r ** 2. / rho ** 2. / 2.) / rho**3
             
@@ -456,27 +458,18 @@ def nel_shock(gamma, **params):
     electron density at shock
     from Atoyan & Aharonian (1996)
     """
-    params.setdefault("Sbreak", 0.0)
-    params.setdefault("gwind_b", 1e-05)
-    mask = gamma > 1/params['gwind_b']
-#     result = np.zeros(gamma.shape)
-    result = np.power(1+gamma/params['gwind_min'], params['Swind'])
-    result[mask] *= np.power(gamma[mask]*params['gwind_b'], params['Sbreak'])
-    result *= np.exp(- gamma / params['gwind_max'])
-    result *=  np.exp(-np.power(params['gwind_min'] / gamma, 2.8))
-    result *= params['Nwind'] 
+    result = np.zeros(gamma.shape)
+    m_wind = (gamma > params['gwind_min']/3) & (gamma <= params['gwind_max']*3) # min - max
+    m_wind_br2 = (gamma > params['gwind_min']/3) & (gamma <= params['gwind_2']) # min - b2
+    m_wind_br3 = (gamma > params['gwind_2']) & (gamma <= params['gwind_max']*3) # b2 - max
+    
+    result[m_wind_br2] += np.power(gamma[m_wind_br2] / params['gwind_2'], params['S2'])
+    result[m_wind_br3] += np.power(gamma[m_wind_br3] / params['gwind_2'], params['S3'])
+    result[m_wind] *= np.exp(- gamma[m_wind] / params['gwind_max'])
+    result[m_wind] *= np.exp(-np.power(params['gwind_min'] / gamma[m_wind], 2.8))
+    result[m_wind] *= params['Nwind']
+       
     return result
-
-# for KC model v04 and earlier
-# def nel_shock(gamma, **params):
-#     """
-#     electron density at shock
-#     from Atoyan & Aharonian (1996)
-#     """
-#     result = params['Nwind'] * np.power(params['gwind_min'] + gamma, params['Swind'])
-#     result *= np.exp(- gamma / params['gwind_max'])
-
-#     return result
 
 def nel_wind_kc(gamma, r, fill_value=1e-80, **params):
     """
