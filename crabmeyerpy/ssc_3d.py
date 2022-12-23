@@ -181,7 +181,7 @@ class CrabSSC3D(object):
 
         # Interpolate x F(x) of synchrotron function,
         # see e.g. Fig. 13 in Blumenthal & Gould 1970
-        steps = 100
+        steps = 400
         self.__start = -40  # upper limit for x F (x) integration
         self.__end = 20  # upper limit for x F (x) integration
 
