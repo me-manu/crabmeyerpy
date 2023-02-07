@@ -1,6 +1,6 @@
 import numpy as np
 from astropy import constants as c
-from collections import Iterable
+from collections.abc import Iterable
 from scipy.integrate import simps
 
 def nel_spec_separate(gamma, r, **params):
