@@ -465,8 +465,8 @@ def nel_shock(gamma, **params):
     
     result[m_wind_br2] += np.power(gamma[m_wind_br2] / params['gwind_2'], params['S2'])
     result[m_wind_br3] += np.power(gamma[m_wind_br3] / params['gwind_2'], params['S3'])
-    result[m_wind] *= np.exp(- gamma[m_wind] / params['gwind_max'])
-    result[m_wind] *= np.exp(-np.power(params['gwind_min'] / gamma[m_wind], 2.8))
+    result[m_wind] *= np.exp(- np.power(gamma[m_wind]/ params['gwind_max'],2.0))
+    result[m_wind] *= np.exp(- np.power(params['gwind_min']/ gamma[m_wind],2.8))
     result[m_wind] *= params['Nwind']
        
     return result
