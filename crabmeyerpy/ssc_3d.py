@@ -831,9 +831,10 @@ class CrabSSC3D(object):
         log_eee1=linspace(x1, x2, e_steps).T[...,None] # for ic_kernel
         log_eee=np.tile(log_eee1, (1,1,1,r.size))  # for photon dens
         m = x2 > x1
+        m = m.T[...,None,None]
         # minimum radius constraint
-        m &= rrr <= self.r0
-        m &= rrr > self._r_shock
+        m = m & (rrr <= self.r0)
+        m = m & (rrr > self._r_shock)
         t1 = time.time()  # lower dimensions and no for loop (3s-->1s)
 
         # calculate photon densities:
@@ -872,7 +873,7 @@ class CrabSSC3D(object):
             phot_dens += black_body(exp(log_eee), cosmo.Tcmb0.value)
 
         t2 = time.time()
-        phot_dens[~m.T] = 1e-40
+        phot_dens[~m] = 1e-40
         m_isnan = np.isnan(phot_dens)
         phot_dens[m_isnan] = 1e-40
 
@@ -1019,12 +1020,12 @@ class CrabSSC3D(object):
 #         nnn = np.tile(nu[:, np.newaxis, np.newaxis], list(xx.shape))
 #         xxx = np.rollaxis(np.tile(xx[..., np.newaxis], list(nu.shape)), -1)
 # >>>>>>> origin/3d-dev-new
-        r = np.linspace(r_min, self.r0, r_steps)
+        r = np.linspace(self._r_shock, self.r0, r_steps)
         ## s are linearly spaced values along the LoS
         ## x are the radii from s to the centre
         x_min_sq = (np.sin(theta_arcmin*arcmin2rad)*self._d)**2
         with np.errstate(invalid='ignore'):
-            s_int_min = np.nan_to_num(np.sqrt(r_min**2 - x_min_sq))
+            s_int_min = np.nan_to_num(np.sqrt(self._r_shock**2 - x_min_sq))
             s_int_max = np.nan_to_num(np.sqrt(self.r0**2 - x_min_sq))
         ss = np.linspace(s_int_min, s_int_max, r_steps).T  # r_steps because s^=r
         xx = np.sqrt(x_min_sq[:,np.newaxis] + ss**2)
