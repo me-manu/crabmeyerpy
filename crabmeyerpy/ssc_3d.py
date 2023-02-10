@@ -32,14 +32,6 @@ class CrabSSC3D(object):
                  n_el,
                  B,
                  j_dust,
-# <<<<<<< HEAD
-#                  d_kpc=2., r0_pc=1.8,
-#                  r_shock_pc=1e-20,
-#                  nu_sync_min=1e7, nu_sync_max=1e30,
-# =======
-#                  d_kpc=2., r0_pc=3.6,
-#                  nu_sync_min=5e8, nu_sync_max=5e23,
-# >>>>>>> origin/3d-dev-new
                  d_kpc=2., r0_pc=3.6,
                  r_shock_pc=1e-20,
                  nu_sync_min=5e8, nu_sync_max=5e23,
@@ -48,10 +40,6 @@ class CrabSSC3D(object):
                  ic_sync=True,
                  ic_dust=True,
                  ic_cmb=True,
-# <<<<<<< HEAD
-# =======
-#                  dust_radial_dependence='shell',
-# >>>>>>> origin/3d-dev-new
                  use_fast_interp=False):
         """
         Initialize the class
@@ -210,7 +198,8 @@ class CrabSSC3D(object):
             # 3sigma of a 2D Gaussian contains ~0.997^2 = 99.4% of the flux
             # could also do 4 sigma but the error of the larger interp grid should be similar
             return max(self.parameters['wind_size_cm'],self.parameters['radio_size_cm'])*3
-        else: return self._r0
+        else: 
+            return self._r0
 
     @property
     def r_shock(self):
@@ -243,10 +232,6 @@ class CrabSSC3D(object):
     @d.setter
     def d(self, d):
         self._d = d
-
-#     @r0.setter
-#     def r0(self, r0):
-#         self._r0 = r0
 
     @r_shock.setter
     def r_shock(self, r_shock):
@@ -360,19 +345,10 @@ class CrabSSC3D(object):
         m = (log(x) > self.__start) & (log(x) < self.__end)
 
         # and for the maximum extension
-# <<<<<<< HEAD
-#         m &= rrr <= self._r0
-
-#         # and for the minimum extension
-#         m &= rrr > self._r_shock
-
-# =======
-#         m &= rrr <= self.r0
-# >>>>>>> origin/3d-dev-new
         m &= rrr <= self.r0
 
         # and for the minimum extension
-        m &= rrr > self._r_shock
+        m &= rrr >= self._r_shock
         result = np.full(x.shape, 1e-80)
 
         # synchrotron function
@@ -613,20 +589,12 @@ class CrabSSC3D(object):
         """
 
         t0 = time.time()
-# <<<<<<< HEAD
-#         r_max = np.min([r.max(), self._r0])
-#         r_min = np.max([r.min(), self._r_shock])
-# =======
-#         r_max = r.max()*0.99 # move 1% out and in of the edges so the r and r1 array
-#         r_min = r.min()*1.01 # do not have the same value (divergence in the kernel)
-# >>>>>>> origin/3d-dev-new
         r_max = np.min([r.max(), self.r0])*0.999 # move .1% out and in of the edges so the r and r1 array
         r_min = np.max([r.min(), self._r_shock])*1.001 # do not have the same value (divergence in the kernel)
 
         ee, xx, y, yy = self._get_integration_arrays(eps, r, r1_steps, r_max, r_min)
 
         # photon emissivity
-        #j_nu = np.full(ee.shape, 1e-10, dtype=np.float32)
         j_nu = np.full(ee.shape, 1e-80, dtype=np.float64)
         t1 = time.time()
 
@@ -646,11 +614,9 @@ class CrabSSC3D(object):
                 j_nu[m] = np.exp(self._j_sync_interp(
                     log(ee[m] * eV2Hz).flatten(),
                     (r_max * yy[m]).flatten()
-                    #log(r_max * yy[m]).flatten()
                 )).reshape(ee[m].shape)
             else:
                 j_nu[m] = np.exp(self._j_sync_interp(log(ee[m] * eV2Hz),
-                                                     #log(r_max * yy[m]),
                                                      r_max * yy[m],
                                                      ))
 
@@ -737,7 +703,6 @@ class CrabSSC3D(object):
         """
 
         # radius for integration of photon emissivity
-#         r1 = np.logspace(np.log10(r_min), np.log10(r_max), r1_steps)
         r1 = np.linspace(r_min, r_max, r1_steps) # linear r grid works much better
         # stack the eps array along new r1 axis
 
@@ -779,63 +744,22 @@ class CrabSSC3D(object):
         gamma = exp(log_g)
 
         # generate the arrays for observed freq nu, gamma factor, radius, and energy of photon field
-# <<<<<<< HEAD
-#         nnn, ggg, _, rrr = meshgrid(nu, log_g, np.arange(e_steps), r, indexing='ij')
-#         _, gg, rr = meshgrid(nu, log_g, r, indexing='ij')
-#         nn, _ = meshgrid(nu, r, indexing='ij')
-
-#         log_eee = zeros(nnn.shape)
-
-#         m = zeros(nnn.shape, dtype=np.bool)
-#         # kinematic constraint
-#         for i, n in enumerate(nu):
-#             for j, lg in enumerate(log_g):
-#                 x1 = max(log(n / eV2Hz / 4. / gamma[j] ** 2.), log(1e-18))
-#                 x2 = log(n / eV2Hz)
-#                 # now log_eps has shape g_steps x e_steps
-#                 log_eee[i, j], _ = np.meshgrid(linspace(x1, x2, e_steps), r, indexing='ij')
-#                 if x2 > x1:
-#                     m[i, j] = True
-
-#         # minimum radius constraint
-#         m &= rrr <= self._r0
-#         m &= rrr > self._r_shock
-
-#         t1 = time.time()
-# =======
-#         nnn, ggg, _ = meshgrid(nu, log_g, np.arange(e_steps), indexing='ij')
-#         nnn=nnn[...,None] # ic kernel
-#         ggg=ggg[...,None] # ic kernel
-#         rrr=np.tile(r,(nu.size,g_steps,e_steps,1)) # phot dens
-#         _, gg, rr = meshgrid(nu, log_g, r, indexing='ij') # n_el
-        
-#         x1=log(nu[None,:] / eV2Hz / 4. / gamma[:,None] ** 2.)
-#         x1 = np.maximum(x1,log(1e-18))
-#         x2 = log(nu[None,:] / eV2Hz)
-#         log_eee1=linspace(x1, x2, e_steps).T[...,None] # for ic_kernel
-#         log_eee=np.tile(log_eee1, (1,1,1,r.size))  # for photon dens
-#         m = x2 > x1
-        
-#         t1 = time.time()  # lower dimensions and no for loop (3s-->1s)
-# >>>>>>> origin/3d-dev-new
-
         nnn, ggg, _ = meshgrid(nu, log_g, np.arange(e_steps), indexing='ij')
-        nnn=nnn[...,None] # ic kernel
-        ggg=ggg[...,None] # ic kernel
+        nnn=nnn[...,np.newaxis] # ic kernel
+        ggg=ggg[...,np.newaxis] # ic kernel
         rrr=np.tile(r,(nu.size,g_steps,e_steps,1)) # phot dens
         _, gg, rr = meshgrid(nu, log_g, r, indexing='ij') # n_el
         
-        x1=log(nu[None,:] / eV2Hz / 4. / gamma[:,None] ** 2.)
+        x1=log(nu[np.newaxis,:] / eV2Hz / 4. / gamma[:,np.newaxis] ** 2.)
         x1 = np.maximum(x1,log(1e-18))
-        x2 = log(nu[None,:] / eV2Hz)
-        log_eee1=linspace(x1, x2, e_steps).T[...,None] # for ic_kernel
+        x2 = log(nu[np.newaxis,:] / eV2Hz)
+        log_eee1=linspace(x1, x2, e_steps).T[...,np.newaxis] # for ic_kernel
         log_eee=np.tile(log_eee1, (1,1,1,r.size))  # for photon dens
         m = x2 > x1
-        m = m.T[...,None,None]
+        m = m.T[...,np.newaxis,np.newaxis]
         # minimum radius constraint
         m = m & (rrr <= self.r0)
         m = m & (rrr > self._r_shock)
-        t1 = time.time()  # lower dimensions and no for loop (3s-->1s)
 
         # calculate photon densities:
         # these are in photons / eV / cm^3
@@ -973,53 +897,11 @@ class CrabSSC3D(object):
             theta_arcmin = np.linspace(0., self.theta_max_arcmin() * 0.999, theta)
         else:
             if np.max(theta) > self.theta_max_arcmin():
-                raise ValueError(f"Can't go further than {self.theta_max_arcmin():.2f}arcmin. theta max was requested at {np.max(theta):.2f}arcmin.")
+                raise ValueError(f"Can't go further than {self.theta_max_arcmin():.2f}arcmin. "
+                                 f"theta max was requested at {np.max(theta):.2f}arcmin.")
             theta_arcmin = theta
 
         # build the integration array
-# <<<<<<< HEAD
-#         rr = np.zeros((theta_arcmin.size, r_steps))
-#         # we start here from zero and use a mask later
-#         # to get the integration bounds right
-#         r = np.linspace(0., self._r0, r_steps)
-
-#         for i, t in enumerate(theta_arcmin):
-#             # we use zero here for same reason as above
-#             rr[i] = np.linspace(0., self._r0, r_steps)
-
-#         # build 3D arrays over nu, r
-#         tt, _ = np.meshgrid(theta_arcmin, r, indexing='ij')
-
-#         # build 3D arrays over nu, theta, r
-#         nnn = np.tile(nu[:, np.newaxis, np.newaxis], list(rr.shape))
-#         rrr = np.rollaxis(np.tile(rr[..., np.newaxis], list(nu.shape)), -1)
-#         ttt = np.rollaxis(np.tile(tt[..., np.newaxis], list(nu.shape)), -1)
-
-#         _, tntn = np.meshgrid(nu, theta_arcmin, indexing='ij')
-
-#         # build the array over the line of sight
-#         # within the nebula
-#         sss = (self._d - rrr) / np.cos(ttt * arcmin2rad)
-
-#         # the interpolation of the emissivity
-#         # is over nu and r
-#         # thus, for each point along the line of sight
-#         # you need to calculate the corresponding distance to the nebula center
-#         xxx = np.sqrt(sss ** 2. + self._d ** 2. - 2. * self._d * sss * np.cos(ttt * arcmin2rad))
-# =======
-#         r = np.linspace(r_min, self.r0, r_steps)
-#         ## s are linearly spaced values along the LoS
-#         ## x are the radii from s to the centre
-#         x_min_sq = (np.sin(theta_arcmin*arcmin2rad)*self._d)**2
-#         with np.errstate(invalid='ignore'):
-#             s_int_min = np.nan_to_num(np.sqrt(r_min**2 - x_min_sq))
-#             s_int_max = np.nan_to_num(np.sqrt(self.r0**2 - x_min_sq))
-#         ss = np.linspace(s_int_min, s_int_max, r_steps).T  # r_steps because s^=r
-#         xx = np.sqrt(x_min_sq[:,np.newaxis] + ss**2)
-                                      
-#         nnn = np.tile(nu[:, np.newaxis, np.newaxis], list(xx.shape))
-#         xxx = np.rollaxis(np.tile(xx[..., np.newaxis], list(nu.shape)), -1)
-# >>>>>>> origin/3d-dev-new
         r = np.linspace(self._r_shock, self.r0, r_steps)
         ## s are linearly spaced values along the LoS
         ## x are the radii from s to the centre
@@ -1032,16 +914,12 @@ class CrabSSC3D(object):
                                       
         nnn = np.tile(nu[:, np.newaxis, np.newaxis], list(xx.shape))
         xxx = np.rollaxis(np.tile(xx[..., np.newaxis], list(nu.shape)), -1)
-#         # mask out values where xxx < max(r_shock, d sin theta) and xxx > r0
-#         m = xxx > np.maximum(np.sin(ttt * arcmin2rad) * self._d, self._r_shock)
-#         m &= xxx <= self._r0
 
         # get the volume emissivity
         if which == 'sync':
             if self._j_sync_interp is None:
                 self.interp_sync_init(r_min=r.min(), r_max=r.max(), **kwargs)
 
-#             xxx[xxx == 0.] = 1e-10
             j = np.exp(self._j_sync_interp(np.log(nnn), xxx))
 
         elif which == 'dust':
@@ -1055,9 +933,6 @@ class CrabSSC3D(object):
 
         else:
             raise ValueError("Unknown value provided for 'which'. Options are 'sync', 'dust', or 'ic'")
-
-#         # apply mask
-#         j[~m] = 1e-200
 
         # integrate
         # Since j_nu is in ergs / s / cm^3 / sr / Hz
@@ -1093,10 +968,6 @@ class CrabSSC3D(object):
 
         r_steps: int
             steps used for integration over r for intensity calculation
-
-        r_min: float
-            minimum radius considered for line of sight integration for
-            intensity
 
         theta_steps: int
             steps used for integration over solid angle between edges
@@ -1194,9 +1065,6 @@ class CrabSSC3D(object):
 
         r_steps: int
             steps used for integration over r
-
-        r_min: float
-            minimum radius considered for line of sight integration
 
         which: str
             specify for which radiation you want to calculate the
