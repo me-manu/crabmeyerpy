@@ -348,7 +348,7 @@ class CrabSSC3D(object):
         m &= rrr <= self.r0
 
         # and for the minimum extension
-        m &= rrr >= self._r_shock
+#         m &= rrr >= self._r_shock
         result = np.full(x.shape, 1e-80)
 
         # synchrotron function
