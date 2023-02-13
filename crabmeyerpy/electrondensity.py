@@ -19,7 +19,7 @@ def nel_spec_separate(gamma, r, **params):
     -------
     Total electron spectrum as array
     """
-    result = nel_crab_radio(gamma, **params) * nel_radio_extension_gauss(r, **params)
+    result = nel_crab_radio_cutoff(gamma, **params) * nel_radio_extension_gauss(r, **params)
     result += nel_crab_wind(gamma, **params) * nel_crab_extension(r, gamma, **params)
     return result
 
@@ -136,9 +136,9 @@ def nel_crab_radio_cutoff(gamma, **params):
     See Eq. 1 in https://arxiv.org/pdf/1008.4524.pdf
     """
     result = np.zeros(gamma.shape)
-    m_radio = (gamma > params['gradio_min'])
+    m_radio = (gamma > params['gradio_min']) & (gamma < params['gradio_max']*1.5)
     result[m_radio] = np.power(gamma[m_radio], params['Sradio']) * params['Nradio']
-    result[m_radio] *= np.exp(-gamma[m_radio] / params['gradio_max'])
+    result[m_radio] *= np.exp(-np.power(gamma[m_radio] / params['gradio_max'], params['sup_wind']))
     return result
 
 
