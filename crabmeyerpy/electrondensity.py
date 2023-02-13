@@ -466,7 +466,7 @@ def nel_shock(gamma, **params):
     result[m_wind_br2] += np.power(gamma[m_wind_br2] / params['gwind_2'], params['S2'])
     result[m_wind_br3] += np.power(gamma[m_wind_br3] / params['gwind_2'], params['S3'])
     result[m_wind] *= np.exp(- np.power(gamma[m_wind]/ params['gwind_max'],2.0))
-    result[m_wind] *= np.exp(- np.power(params['gwind_min']/ gamma[m_wind],2.8))
+    result[m_wind] *= np.exp(- np.power(params['gwind_min']/ gamma[m_wind],params['sup_wind']))
     result[m_wind] *= params['Nwind']
        
     return result
@@ -534,4 +534,12 @@ def B_kc(r, **params):
     B_nebula = B_down * z / vz_sq(z, sigma)
     return B_nebula
 
-
+def pl_B(r, **params):
+    """
+    Model the B-field as Power Law. 
+    Inside 'r_shock' assume constant value 'B0' and outside B0*(r/r_shock)^-index
+    """
+    mask = r > params['r_shock']
+    result = np.full(r.shape, params['B0'])
+    result[mask] = params['B0'] * np.power(r[mask]/params['r_shock'], params['B_index'])
+    return result
