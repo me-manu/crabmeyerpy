@@ -23,6 +23,10 @@ def nel_spec_separate(gamma, r, **params):
     result += nel_crab_wind(gamma, **params) * nel_crab_extension(r, gamma, **params)
     return result
 
+def n_el_spec(gamma, r, **params):
+    """The electron distribution for the KC model """
+    return nel_crab_radio_cutoff(gamma, **params) * nel_radio_extension_gauss(r, **params) + nel_wind_kc(gamma, r, **params)
+
 def nel_crab(gamma, **params):
     """
     Computes total electron number spectrum per unit gamma interval dN / dgamma
@@ -463,8 +467,12 @@ def nel_shock(gamma, **params):
     m_wind_br2 = (gamma > params['gwind_min']/3) & (gamma <= params['gwind_2']) # min - b2
     m_wind_br3 = (gamma > params['gwind_2']) & (gamma <= params['gwind_max']*3) # b2 - max
     
-    result[m_wind_br2] += np.power(gamma[m_wind_br2] / params['gwind_2'], params['S2'])
-    result[m_wind_br3] += np.power(gamma[m_wind_br3] / params['gwind_2'], params['S3'])
+#     result[m_wind_br2] += np.power(gamma[m_wind_br2] / params['gwind_2'], params['S2'])
+#     result[m_wind_br3] += np.power(gamma[m_wind_br3] / params['gwind_2'], params['S3'])
+    
+    result[m_wind_br2] += np.power(1+ (gamma[m_wind_br2] / params['gwind_min']), params['S2'])
+    result[m_wind_br3] += np.power(1+ (gamma[m_wind_br3] / params['gwind_min']),params['S3'])/ np.power(1+ (params['gwind_2'] / params['gwind_min']), params['S3']-params['S2'])
+    
     result[m_wind] *= np.exp(- np.power(gamma[m_wind]/ params['gwind_max'],2.0))
     result[m_wind] *= np.exp(- np.power(params['gwind_min']/ gamma[m_wind],params['sup_wind']))
     result[m_wind] *= params['Nwind']
