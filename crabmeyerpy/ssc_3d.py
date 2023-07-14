@@ -273,7 +273,7 @@ class CrabSSC3D(object):
     def ic_dust(self, ic_dust):
         self._ic_dust = ic_dust
 
-    def j_sync(self, nu, r, g_steps=65, gmin=None, gmax=None, g_axis=2, integration_mode='simps'):
+    def j_sync(self, nu, r, g_steps=129, gmin=None, gmax=None, g_axis=2, integration_mode='simps'):
         """
         Computes the spectral volume emissivity j_nu = j(nu, r) = dE / (dt dV dnu dOmega) for synchrotron radiation
         in erg/s/Hz/cm^3/sr as integral over electron distribution
@@ -348,7 +348,7 @@ class CrabSSC3D(object):
         m &= rrr <= self.r0
 
         # and for the minimum extension
-#         m &= rrr >= self._r_shock
+        m &= rrr >= self._r_shock
         result = np.full(x.shape, 1e-80)
 
         # synchrotron function
@@ -393,9 +393,9 @@ class CrabSSC3D(object):
     def interp_sync_init(self, r_min, r_max,
                          gmin=None,
                          gmax=None,
-                         nu_steps=100,
+                         nu_steps=50,
                          g_steps=129,
-                         r_steps=80,
+                         r_steps=65,
                          integration_mode='simps'):
         """
         Initialize 2D interpolation of synchrotron emissivity j_nu in erg/s/Hz/cm^3/sr
@@ -564,7 +564,7 @@ class CrabSSC3D(object):
         # results in emissivity erg / s / Hz / cm^3 / sr
         return result
 
-    def phot_dens(self, eps, r, r1_steps=33):
+    def phot_dens(self, eps, r, r1_steps=129):
         """
         Calculate photon number density of Crab nebula according to Hillas et al. (1998)
         for the synchrotron and / or dust compoment
@@ -714,7 +714,7 @@ class CrabSSC3D(object):
         y = r1 / r_max
         return ee, xx, y, yy
 
-    def j_ic(self, nu, r, g_steps=129, e_steps=129, r1_steps=33, integration_mode='simps', test=0):
+    def j_ic(self, nu, r, g_steps=129, e_steps=129, r1_steps=129, integration_mode='simps', test=0):
         """
 
         Spectral luminosity F_nu in erg/s/Hz/cm^2 for inverse Compton scattering.
@@ -759,7 +759,7 @@ class CrabSSC3D(object):
         m = m.T[...,np.newaxis,np.newaxis]
         # minimum radius constraint
         m = m & (rrr <= self.r0)
-        m = m & (rrr > self._r_shock)
+        m = m & (rrr >= self._r_shock)
 
         # calculate photon densities:
         # these are in photons / eV / cm^3
@@ -855,7 +855,7 @@ class CrabSSC3D(object):
 
     def intensity(self, nu, theta,
                   which='sync',
-                  r_steps=129,
+                  r_steps=65,
                   integration_mode='simps',
                   **kwargs):
         """
@@ -947,8 +947,8 @@ class CrabSSC3D(object):
     def flux(self,
              nu, theta_edges=None,
              which='sync',
-             r_steps=129,
-             theta_steps=17,
+             r_steps=65,
+             theta_steps=129,
              integration_mode='simps',
              **kwargs):
         """
@@ -1045,9 +1045,9 @@ class CrabSSC3D(object):
     def ext68(self,
               nu,
               which='sync',
-              r_steps=129,
+              r_steps=65,
               theta_max=None,
-              theta_steps=20,
+              theta_steps=33,
               theta_steps_interp=500,
               integration_mode='simps',
               test=0,
