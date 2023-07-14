@@ -19,9 +19,13 @@ def nel_spec_separate(gamma, r, **params):
     -------
     Total electron spectrum as array
     """
-    result = nel_crab_radio(gamma, **params) * nel_radio_extension_gauss(r, **params)
+    result = nel_crab_radio_cutoff(gamma, **params) * nel_radio_extension_gauss(r, **params)
     result += nel_crab_wind(gamma, **params) * nel_crab_extension(r, gamma, **params)
     return result
+
+def n_el_spec(gamma, r, **params):
+    """The electron distribution for the KC model """
+    return nel_crab_radio_cutoff(gamma, **params) * nel_radio_extension_gauss(r, **params) + nel_wind_kc(gamma, r, **params)
 
 def nel_crab(gamma, **params):
     """
@@ -136,9 +140,9 @@ def nel_crab_radio_cutoff(gamma, **params):
     See Eq. 1 in https://arxiv.org/pdf/1008.4524.pdf
     """
     result = np.zeros(gamma.shape)
-    m_radio = (gamma > params['gradio_min'])
+    m_radio = (gamma > params['gradio_min']) & (gamma < params['gradio_max']*1.5)
     result[m_radio] = np.power(gamma[m_radio], params['Sradio']) * params['Nradio']
-    result[m_radio] *= np.exp(-gamma[m_radio] / params['gradio_max'])
+    result[m_radio] *= np.exp(-np.power(gamma[m_radio] / params['gradio_max'], params['sup_wind']))
     return result
 
 
@@ -463,10 +467,14 @@ def nel_shock(gamma, **params):
     m_wind_br2 = (gamma > params['gwind_min']/3) & (gamma <= params['gwind_2']) # min - b2
     m_wind_br3 = (gamma > params['gwind_2']) & (gamma <= params['gwind_max']*3) # b2 - max
     
-    result[m_wind_br2] += np.power(gamma[m_wind_br2] / params['gwind_2'], params['S2'])
-    result[m_wind_br3] += np.power(gamma[m_wind_br3] / params['gwind_2'], params['S3'])
+#     result[m_wind_br2] += np.power(gamma[m_wind_br2] / params['gwind_2'], params['S2'])
+#     result[m_wind_br3] += np.power(gamma[m_wind_br3] / params['gwind_2'], params['S3'])
+    
+    result[m_wind_br2] += np.power(1+ (gamma[m_wind_br2] / params['gwind_min']), params['S2'])
+    result[m_wind_br3] += np.power(1+ (gamma[m_wind_br3] / params['gwind_min']),params['S3'])/ np.power(1+ (params['gwind_2'] / params['gwind_min']), params['S3']-params['S2'])
+    
     result[m_wind] *= np.exp(- np.power(gamma[m_wind]/ params['gwind_max'],2.0))
-    result[m_wind] *= np.exp(- np.power(params['gwind_min']/ gamma[m_wind],2.8))
+    result[m_wind] *= np.exp(- np.power(params['gwind_min']/ gamma[m_wind],params['sup_wind']))
     result[m_wind] *= params['Nwind']
        
     return result
@@ -534,4 +542,12 @@ def B_kc(r, **params):
     B_nebula = B_down * z / vz_sq(z, sigma)
     return B_nebula
 
-
+def pl_B(r, **params):
+    """
+    Model the B-field as Power Law. 
+    Inside 'r_shock' assume constant value 'B0' and outside B0*(r/r_shock)^-index
+    """
+    mask = r > params['r_shock']
+    result = np.full(r.shape, params['B0'])
+    result[mask] = params['B0'] * np.power(r[mask]/params['r_shock'], params['B_index'])
+    return result
