@@ -1,0 +1,30 @@
+# extension for the fit
+# freq, r68 unc_r68 flag
+# optical
+#7.23604167738e+14  90. 1. 1. 9
+# UVOT updated (DH July 29th)
+1.03e15 99. 1. 1. 9
+# soft,medium,hard band chandra, average energy, obtained with ecf_calc
+# with/without background subtraction
+2.66e17 45 1. 1. 9
+3.7e17 42.9 1. 1. 9
+8e17 40. 1. 1. 9
+1.9e18 36.3 1. 1. 9
+# 0.7 keV (Chandra)
+#1.6934078627e+17  45. 1. 1. 9 
+# nustar (using plot_xray_zoom.ipynb - method)
+# 3-5 keV
+1.2e18   37. 3. 1. 9
+# 8-12 keV
+2.4e18 32.9 3. 1. 9
+# 35-80 keV 
+1.2e+19  27. 3. 1. 9
+# ir
+4.28e12 112 5. 5. 9
+0.89e14 141.7 5. 5. 9
+0.65e14 140.5 5. 5. 9 
+0.248e14 118.4 5. 5.  9
+0.14e14 137 5. 5. 9 
+# radio
+5e9 117 1. 1. 9
+1.5e11 115.4 2. 2. 9

@@ -1,16 +1,31 @@
 import numpy as np
 from astropy import constants as c
-from collections import Iterable
+from collections.abc import Iterable
 from scipy.integrate import simps
 
 def nel_spec_separate(gamma, r, **params):
     """
     Computes the total electron distribution as function of gamma and r. Uses
-    separate extension models for radio and wind electrons
+    separate extension models for radio and wind electrons.
+    
+    r: array-like
+        distance from nebula center in cm
+    gamma: array-like
+        gamma factors
+    params: dict
+        function parameters
+
+    Returns
+    -------
+    Total electron spectrum as array
     """
-    result = nel_crab_radio(gamma, **params) * nel_radio_extension_gauss(r, **params)
+    result = nel_crab_radio_cutoff(gamma, **params) * nel_radio_extension_gauss(r, **params)
     result += nel_crab_wind(gamma, **params) * nel_crab_extension(r, gamma, **params)
     return result
+
+def n_el_spec(gamma, r, **params):
+    """The electron distribution for the KC model """
+    return nel_crab_radio_cutoff(gamma, **params) * nel_radio_extension_gauss(r, **params) + nel_wind_kc(gamma, r, **params)
 
 def nel_crab(gamma, **params):
     """
@@ -125,9 +140,9 @@ def nel_crab_radio_cutoff(gamma, **params):
     See Eq. 1 in https://arxiv.org/pdf/1008.4524.pdf
     """
     result = np.zeros(gamma.shape)
-    m_radio = (gamma > params['gradio_min'])
+    m_radio = (gamma > params['gradio_min']) & (gamma < params['gradio_max']*1.5)
     result[m_radio] = np.power(gamma[m_radio], params['Sradio']) * params['Nradio']
-    result[m_radio] *= np.exp(-gamma[m_radio] / params['gradio_max'])
+    result[m_radio] *= np.exp(-np.power(gamma[m_radio] / params['gradio_max'], params['sup_wind']))
     return result
 
 
@@ -147,7 +162,7 @@ def nel_radio_extension_gauss(r, **params):
     Gaussian extension for radio electrons
     with width radio_size_cm
     """
-    result = np.exp(-r**2. / 2. / params['radio_size_cm']**2)
+    result = np.exp(-r**2. / 2. / params['radio_size_cm']**2)/ params['radio_size_cm']**3
     return result
 
 
@@ -173,33 +188,23 @@ def nel_crab_wind(gamma, **params):
     -----
     See Eq. 2 in https://arxiv.org/pdf/1008.4524.pdf
     """
-    params.setdefault('gwind_b2', 1/params['gmin'] ) # ensure backwards compatibility
-    params.setdefault('Sbreak2', 0 )
+    
     result = np.zeros(gamma.shape)
-    m_wind = (gamma > params['gmin']) & (gamma <= 1. / params['gwind_b']) # min - b
-    m_wind_br1 = (gamma > params['gmin']) & (gamma <= 1./ params['gwind_b2']) # min - b2
-    m_wind_br2 = (gamma > 1. / params['gwind_b']) & (gamma <= params['gmax']) # b - max
-    m_wind_tot = (gamma > params['gmin']) & (gamma <= params['gmax']) # min - max
+    m_wind_tot = (gamma > params['gwind_min']/3) & (gamma <= params['gwind_max']*3) # min - max
+    m_wind_br1 = (gamma > params['gwind_min']/3) & (gamma <= params['gwind_1']) # min - b1
+    m_wind_br2 = (gamma > params['gwind_1']) & (gamma <= params['gwind_2']) # b1 - b2
+    m_wind_br3 = (gamma > params['gwind_2']) & (gamma <= params['gwind_max']*3) # b2 - max
     
-    ### hard cutoff at gwind_max
-#     m_wind_br = (gamma > 1. / params['gwind_b']) & (gamma < params['gwind_max'])
-#     m_wind_tot = (gamma > params['gmin']) & (gamma < params['gwind_max'])
-#     result[m_wind] += np.power(gamma[m_wind] * params['gwind_b'], params['Swind'])
-#     result[m_wind_br] += np.power(gamma[m_wind_br] * params['gwind_b'], params['Swind'] + params['Sbreak'])
-#     result[m_wind_tot] *= params['Nwind']
-#     result[m_wind_tot] *= np.exp(-np.power(params['gwind_min'] / gamma[m_wind_tot], params['sup_wind']))
-    
-    ### exp cutoff after gwind_max
-    
-    result[m_wind] += np.power(gamma[m_wind] * params['gwind_b'], params['Swind'])
-    result[m_wind_br1] *= np.power(gamma[m_wind_br1] * params['gwind_b2'], params['Sbreak2'])
-    result[m_wind_br2] += np.power(gamma[m_wind_br2] * params['gwind_b'], params['Swind'] + params['Sbreak'])
-    result[m_wind_tot] *= params['Nwind']
+    result[m_wind_br1] += np.power(gamma[m_wind_br1] / params['gwind_1'], params['S1']) \
+                        * np.power(params['gwind_1'] / params['gwind_2'], params['S2'])
+    result[m_wind_br2] += np.power(gamma[m_wind_br2] / params['gwind_2'], params['S2'])
+    result[m_wind_br3] += np.power(gamma[m_wind_br3] / params['gwind_2'], params['S3'])
     result[m_wind_tot] *= np.exp(-np.power(params['gwind_min'] / gamma[m_wind_tot], params['sup_wind']))
     result[m_wind_tot] *= np.exp(- np.power(gamma[m_wind_tot]/ params['gwind_max'],2))  
-    
-    
+    result[m_wind_tot] *= params['Nwind']
+       
     return result
+
 
 
 def electron_distribution_width_old(gamma, **params):
@@ -257,6 +262,33 @@ def electron_distribution_width(gamma, **params):
         rho *= params["norm_spatial"]
 
     return rho
+
+def electron_distribution_width_simple_PL(gamma, **params):
+    """
+    Calculate the energy-dependent width of the electron distribution
+
+
+    Parameters
+    ----------
+    gamma: array-like
+        gamma values
+
+    params: dict
+        dict with parameters
+
+    Returns
+    -------
+    Width of electron distribution as a function of gamma
+    """
+
+#     return params['wind_size_cm'] * (gamma/params['gradio_max'])**params['index']
+#     return params['wind_size_cm'] * gamma**params['index']
+
+    # Dieter's implementation eq. (5)
+    # 
+    prefactor = params['wind_size_cm']#/3600 *np.pi/180 *6.171355162982735e+21 # * d_crab/2kpc (= 1)
+    base = np.power(gamma/9e5,2)   # * B_0/264 (=1)
+    return prefactor * np.power(base, -params['index'])
 
 
 def electron_distribution_width_bpl(gamma, **params):
@@ -318,16 +350,9 @@ def electron_distribution_width_bpl_smooth(gamma, **params):
     rho = np.zeros(gamma.shape)
     # nebula size constant in energy for electron energies below 34 GeV
     rho = 1. + np.power(gamma / params['gradio_max'], params['smooth'])
-    rho = np.power(rho, params['index'] / params['smooth'])
+    rho = np.power(rho, -params['index'] / params['smooth'])
     # check for wind_size in case of separate extensions
-    if 'wind_size_cm' in params.keys():
-        rho *= params['wind_size_cm']
-    else:
-        rho *= params['radio_size_cm']
-
-    if "norm_spatial" in params:
-        rho *= params["norm_spatial"]
-
+    rho *= params['wind_size_cm']
     return rho
 
 
@@ -347,15 +372,14 @@ def nel_crab_extension(r, gamma, **params):
     -------
     spatial distribution
     """
+    ### <--(>) (un)comment for Dieter's model (simple PL extension)
     #rho = electron_distribution_width(gamma, **params)
     #rho = electron_distribution_width_bpl(gamma, **params)
-    rho = electron_distribution_width_bpl_smooth(gamma, **params)
+#     rho = electron_distribution_width_bpl_smooth(gamma, **params) # -->
+    rho = electron_distribution_width_simple_PL(gamma, **params)  # <--
 
-    result = np.exp(-r ** 2. / rho ** 2. / 2.)
-    
-    if "norm_spatial" in params:
-        result /= params["norm_spatial"]**2  # keeps flux relatively constant when changing norm_spatial
-        
+    result = np.exp(-r ** 2. / rho ** 2. / 2.) / rho**3
+            
     return result
 
 
@@ -438,27 +462,22 @@ def nel_shock(gamma, **params):
     electron density at shock
     from Atoyan & Aharonian (1996)
     """
-    params.setdefault("Sbreak", 0.0)
-    params.setdefault("gwind_b", 1e-05)
-    mask = gamma > 1/params['gwind_b']
-#     result = np.zeros(gamma.shape)
-    result = np.power(1+gamma/params['gwind_min'], params['Swind'])
-    result[mask] *= np.power(gamma[mask]*params['gwind_b'], params['Sbreak'])
-    result *= np.exp(- gamma / params['gwind_max'])
-    result *=  np.exp(-np.power(params['gwind_min'] / gamma, 2.8))
-    result *= params['Nwind'] 
+    result = np.zeros(gamma.shape)
+    m_wind = (gamma > params['gwind_min']/3) & (gamma <= params['gwind_max']*3) # min - max
+    m_wind_br2 = (gamma > params['gwind_min']/3) & (gamma <= params['gwind_2']) # min - b2
+    m_wind_br3 = (gamma > params['gwind_2']) & (gamma <= params['gwind_max']*3) # b2 - max
+    
+#     result[m_wind_br2] += np.power(gamma[m_wind_br2] / params['gwind_2'], params['S2'])
+#     result[m_wind_br3] += np.power(gamma[m_wind_br3] / params['gwind_2'], params['S3'])
+    
+    result[m_wind_br2] += np.power(1+ (gamma[m_wind_br2] / params['gwind_min']), params['S2'])
+    result[m_wind_br3] += np.power(1+ (gamma[m_wind_br3] / params['gwind_min']),params['S3'])/ np.power(1+ (params['gwind_2'] / params['gwind_min']), params['S3']-params['S2'])
+    
+    result[m_wind] *= np.exp(- np.power(gamma[m_wind]/ params['gwind_max'],2.0))
+    result[m_wind] *= np.exp(- np.power(params['gwind_min']/ gamma[m_wind],params['sup_wind']))
+    result[m_wind] *= params['Nwind']
+       
     return result
-
-# for KC model v04 and earlier
-# def nel_shock(gamma, **params):
-#     """
-#     electron density at shock
-#     from Atoyan & Aharonian (1996)
-#     """
-#     result = params['Nwind'] * np.power(params['gwind_min'] + gamma, params['Swind'])
-#     result *= np.exp(- gamma / params['gwind_max'])
-
-#     return result
 
 def nel_wind_kc(gamma, r, fill_value=1e-80, **params):
     """
@@ -523,4 +542,12 @@ def B_kc(r, **params):
     B_nebula = B_down * z / vz_sq(z, sigma)
     return B_nebula
 
-
+def pl_B(r, **params):
+    """
+    Model the B-field as Power Law. 
+    Inside 'r_shock' assume constant value 'B0' and outside B0*(r/r_shock)^-index
+    """
+    mask = r > params['r_shock']
+    result = np.full(r.shape, params['B0'])
+    result[mask] = params['B0'] * np.power(r[mask]/params['r_shock'], params['B_index'])
+    return result
